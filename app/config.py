@@ -27,5 +27,16 @@ class Settings:
             parsed = parsed._replace(query='&'.join(valid_params) if valid_params else '')
             self.DATABASE_URL = urlunparse(parsed)
 
+            # Ensure password is properly URL-encoded to handle special characters like @
+            if '@' in parsed.netloc and parsed.netloc.count('@') > 1:
+                # Reconstruct with proper encoding
+                user_pass, host_port = parsed.netloc.rsplit('@', 1)
+                if ':' in user_pass:
+                    user, password = user_pass.rsplit(':', 1)
+                    # URL encode the password
+                    from urllib.parse import quote
+                    encoded_password = quote(password, safe='')
+                    self.DATABASE_URL = self.DATABASE_URL.replace(f'{user}:{password}@{host_port}', f'{user}:{encoded_password}@{host_port}')
+
 
 settings = Settings()
