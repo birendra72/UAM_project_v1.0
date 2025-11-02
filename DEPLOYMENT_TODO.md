@@ -10,8 +10,8 @@
 ## 🔄 Deployment Steps
 
 ### Step 1: Push Code to GitHub
-- [ ] Ensure all code is committed and pushed to https://github.com/birendra72/UAM_project_v1.0.git
-- [ ] Verify .gitignore files are working (no sensitive files committed)
+- [x] Ensure all code is committed and pushed to https://github.com/birendra72/UAM_project_v1.0.git
+- [x] Verify .gitignore files are working (no sensitive files committed)
 
 ### Step 2: Deploy Backend to Render
 - [ ] Create Render account at https://dashboard.render.com
@@ -41,4 +41,5 @@
 - [ ] Confirm global accessibility
 
 ## 📋 Current Status
-**Ready to start Step 1: Push Code to GitHub**
+**✅ Step 1 Complete: Code pushed to GitHub**
+**Ready to start Step 2: Deploy Backend to Render**
