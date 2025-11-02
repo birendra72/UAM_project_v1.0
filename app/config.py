@@ -1,5 +1,6 @@
 import os
 from dotenv import load_dotenv
+from urllib.parse import urlparse, urlunparse
 
 load_dotenv()
 
@@ -14,6 +15,17 @@ class Settings:
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))  # 24 hours
     USE_MINIO: bool = os.getenv("USE_MINIO", "false").lower() == "true"
+
+    def __init__(self):
+        # Clean DATABASE_URL to remove invalid psycopg2 options like 'pgbouncer'
+        if self.DATABASE_URL.startswith("postgresql"):
+            parsed = urlparse(self.DATABASE_URL)
+            # Remove query parameters that psycopg2 doesn't recognize
+            invalid_params = {'pgbouncer'}
+            query_params = parsed.query.split('&') if parsed.query else []
+            valid_params = [p for p in query_params if not any(inv in p for inv in invalid_params)]
+            parsed = parsed._replace(query='&'.join(valid_params) if valid_params else '')
+            self.DATABASE_URL = urlunparse(parsed)
 
 
 settings = Settings()
