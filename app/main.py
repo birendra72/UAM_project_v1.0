@@ -52,6 +52,10 @@ app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 # Mount static files for serving artifacts
 app.mount("/files", StaticFiles(directory="./storage"), name="files")
 
-@app.get("/api/")
+@app.get("/")
 def read_root():
+    return {"message": "Welcome to UAM Backend API"}
+
+@app.get("/api/")
+def read_api_root():
     return {"message": "Welcome to UAM Backend API"}
