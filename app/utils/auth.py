@@ -10,9 +10,8 @@ def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
 
 def get_password_hash(password):
-    # Truncate password to 72 characters before encoding to comply with bcrypt limitation
+    # Truncate password to 72 bytes before hashing to comply with bcrypt limitation
     if isinstance(password, str):
-        password = password[:72]  # Truncate to 72 characters first
         password = password.encode('utf-8')
     if len(password) > 72:
         password = password[:72]

@@ -25,6 +25,7 @@ origins = [
     "http://localhost:3000",
     "http://localhost:8080",
     "http://172.17.240.1:8080",
+    "http://172.18.128.1:8080",
     "http://192.168.31.9:8080",
     "https://uam-project-v1-0.vercel.app",  # Production frontend
 ]
