@@ -862,13 +862,15 @@ class MLService:
             }
 
     @staticmethod
-    def generate_prediction_summary(predictions: np.ndarray) -> Dict[str, Any]:
+    def generate_prediction_summary(predictions: np.ndarray, confidence_scores: np.ndarray = None) -> Dict[str, Any]:
         """
-        Generate summary statistics for predictions
+        Generate detailed summary statistics for predictions
         """
         summary = {
             "total_predictions": len(predictions),
-            "prediction_types": {}
+            "prediction_types": {},
+            "statistics": {},
+            "confidence": {}
         }
 
         # Handle different prediction types
@@ -877,16 +879,60 @@ class MLService:
                 "min": float(np.min(predictions)),
                 "max": float(np.max(predictions)),
                 "mean": float(np.mean(predictions)),
+                "median": float(np.median(predictions)),
                 "std": float(np.std(predictions)),
-                "unique_values": len(np.unique(predictions))
+                "q25": float(np.percentile(predictions, 25)),
+                "q75": float(np.percentile(predictions, 75)),
+                "unique_values": len(np.unique(predictions)),
+                "range": float(np.max(predictions) - np.min(predictions))
             }
+
+            # Add prediction ranges for regression
+            summary["statistics"]["prediction_ranges"] = {
+                "low": f"< {np.percentile(predictions, 25):.2f}",
+                "medium": f"{np.percentile(predictions, 25):.2f} - {np.percentile(predictions, 75):.2f}",
+                "high": f"> {np.percentile(predictions, 75):.2f}"
+            }
+
         else:  # categorical
             unique_vals, counts = np.unique(predictions, return_counts=True)
+            total = len(predictions)
+            percentages = (counts / total * 100).round(2)
+
             summary["prediction_types"]["categorical"] = {
                 "unique_values": len(unique_vals),
                 "most_common": str(unique_vals[np.argmax(counts)]),
-                "distribution": dict(zip(unique_vals.astype(str).tolist(), counts.tolist()))
+                "least_common": str(unique_vals[np.argmin(counts)]),
+                "distribution": dict(zip(unique_vals.astype(str).tolist(), counts.tolist())),
+                "percentages": dict(zip(unique_vals.astype(str).tolist(), percentages.tolist())),
+                "entropy": float(stats.entropy(counts / total))  # Diversity measure
             }
+
+            # Add class distribution summary
+            summary["statistics"]["class_distribution"] = {
+                "majority_class": str(unique_vals[np.argmax(counts)]),
+                "majority_percentage": float(percentages[np.argmax(counts)]),
+                "minority_class": str(unique_vals[np.argmin(counts)]),
+                "minority_percentage": float(percentages[np.argmin(counts)])
+            }
+
+        # Add confidence information if available
+        if confidence_scores is not None and len(confidence_scores) == len(predictions):
+            summary["confidence"] = {
+                "mean_confidence": float(np.mean(confidence_scores)),
+                "min_confidence": float(np.min(confidence_scores)),
+                "max_confidence": float(np.max(confidence_scores)),
+                "std_confidence": float(np.std(confidence_scores)),
+                "high_confidence_ratio": float(np.mean(confidence_scores > 0.8)),
+                "low_confidence_ratio": float(np.mean(confidence_scores < 0.5))
+            }
+
+        # Add overall statistics
+        summary["statistics"]["data_quality"] = {
+            "has_null_predictions": bool(np.any(pd.isna(predictions))),
+            "prediction_variance": float(np.var(predictions)) if predictions.dtype.kind in ['i', 'f'] else None,
+            "outlier_count": int(np.sum(np.abs(stats.zscore(predictions)) > 3)) if predictions.dtype.kind in ['i', 'f'] else None
+        }
 
         return summary
 

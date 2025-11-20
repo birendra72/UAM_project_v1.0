@@ -77,6 +77,8 @@ export default function PredictionInterface({ projectId }: PredictionInterfacePr
     },
     onSuccess: (data) => {
       setPredictions(data.predictions);
+      // Invalidate prediction summary cache to refresh it
+      queryClient.invalidateQueries({ queryKey: ['prediction-summary', projectId] });
       toast.success('Predictions generated successfully!');
     },
     onError: (error) => {
@@ -91,6 +93,8 @@ export default function PredictionInterface({ projectId }: PredictionInterfacePr
     },
     onSuccess: (data: PredictFileResponse) => {
       setPredictions(data.predictions);
+      // Invalidate prediction summary cache to refresh it
+      queryClient.invalidateQueries({ queryKey: ['prediction-summary', projectId] });
       toast.success('File predictions generated successfully!');
     },
     onError: (error) => {
@@ -159,9 +163,9 @@ export default function PredictionInterface({ projectId }: PredictionInterfacePr
         setBatchProgress(response.progress * 100);
 
         if (response.status === 'COMPLETED') {
-          // Load results
+          // Load results and invalidate summary cache
           if (response.results_key) {
-            // For now, we'll just show completion message
+            queryClient.invalidateQueries({ queryKey: ['prediction-summary', projectId] });
             toast.success('Batch prediction completed!');
           }
         } else if (response.status === 'PENDING' || response.status === 'PROGRESS') {
@@ -413,9 +417,12 @@ export default function PredictionInterface({ projectId }: PredictionInterfacePr
         <Card className="p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold">Prediction Results</h3>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={() => {
+              // Navigate to export tab or show summary cards
+              toast.success('Prediction completed! Check the Export tab for detailed summary.');
+            }}>
               <Download className="h-4 w-4 mr-2" />
-              Export
+              View Summary
             </Button>
           </div>
           <div className="space-y-2 max-h-96 overflow-y-auto">

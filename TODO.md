@@ -1,19 +1,12 @@
-# Deployment to Global Access TODO
+# TODO: Rewrite README.md for UAM Project
 
-## Phase 1: Modify Configuration for Cloud Deployment
-- [x] Modify docker-compose.yml: Remove postgres and minio services, adjust environment variables for Supabase and Redis.
-- [x] Update .env.example with new cloud variables (Supabase DB URL, Redis URL, etc.).
+## Tasks to Complete
+- [ ] Analyze current README.md and gather all relevant information from project files
+- [ ] Structure the new README.md with comprehensive sections: What is a README?, About UAM, Tech Stack, What We've Achieved, Future Scope, How to Run, API Endpoints, Testing, License
+- [ ] Write detailed content for each section, ensuring user-friendly explanations and clear instructions
+- [ ] Verify the rewritten README.md for accuracy and completeness
+- [ ] Test run instructions if possible to ensure they work
 
-## Phase 2: Update Documentation
-- [x] Update README.md with deployment guide for Railway, Supabase, Vercel.
-- [x] Update FrontEnd/README.md with Vercel deployment instructions.
-
-## Phase 3: Deployment Guide and Setup
-- [x] Provide step-by-step guide for setting up Supabase account and project.
-- [x] Provide step-by-step guide for setting up Railway account and deploying backend.
-- [x] Provide step-by-step guide for setting up Vercel and deploying frontend.
-- [x] Handle CORS configuration for frontend-backend communication.
-
-## Phase 4: Testing and Finalization
-- [ ] Test deployed backend and frontend.
-- [ ] Verify all services work globally.
+## Progress Tracking
+- Started: [Date/Time]
+- Completed: [Date/Time]

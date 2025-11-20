@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from datetime import timedelta
 
-from app.schemas.auth import UserCreate, UserLogin, User as UserSchema, Token
+from app.schemas.auth import UserCreate, UserLogin, User as UserSchema, Token, UserUpdate, ChangePassword
 from app.db.session import get_db
 from app.db.models import User as UserModel
 from app.utils.auth import verify_password, get_password_hash, create_access_token
@@ -67,7 +67,7 @@ def reset_password(email: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="User not found")
     return {"message": "Password reset email sent"}
 
-@router.get("/verify-email")
+@router.post("/verify-email")
 def verify_email(token: str, db: Session = Depends(get_db)):
     # TODO: Implement email verification with token
     # For now, just return success
@@ -77,8 +77,39 @@ def verify_email(token: str, db: Session = Depends(get_db)):
 def read_users_me(current_user: UserModel = Depends(get_current_user)):
     return UserSchema(id=str(current_user.id), name=str(current_user.name), email=str(current_user.email), role=str(current_user.role), status=str(current_user.status))
 
+@router.put("/me", response_model=UserSchema)
+def update_user_profile(user_update: UserUpdate, db: Session = Depends(get_db), current_user: UserModel = Depends(get_current_user)):
+    # Check if email is already taken by another user
+    if user_update.email and user_update.email != current_user.email:
+        existing_user = db.query(UserModel).filter(UserModel.email == user_update.email).first()
+        if existing_user:
+            raise HTTPException(status_code=400, detail="Email already registered")
+
+    # Update user fields
+    if user_update.name is not None:
+        current_user.name = user_update.name
+    if user_update.email is not None:
+        current_user.email = user_update.email
+
+    db.commit()
+    db.refresh(current_user)
+    return UserSchema(id=str(current_user.id), name=str(current_user.name), email=str(current_user.email), role=str(current_user.role), status=str(current_user.status))
+
+@router.post("/change-password")
+def change_password(password_data: ChangePassword, db: Session = Depends(get_db), current_user: UserModel = Depends(get_current_user)):
+    # Verify current password
+    if not verify_password(password_data.current_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+    # Hash new password and update
+    hashed_new_password = get_password_hash(password_data.new_password)
+    current_user.password_hash = hashed_new_password
+    db.commit()
+
+    return {"message": "Password changed successfully"}
+
 @router.delete("/users/{user_id}", status_code=204)
-def delete_user(user_id: int, db: Session = Depends(get_db), current_user: UserModel = Depends(get_current_user)):
+def delete_user(user_id: str, db: Session = Depends(get_db), current_user: UserModel = Depends(get_current_user)):
     # Only allow admin or the user themselves to delete
     if not (current_user.id == user_id or current_user.role == "Admin"):
         raise HTTPException(status_code=403, detail="Not authorized to delete this user")

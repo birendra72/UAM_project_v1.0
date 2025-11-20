@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Backgro
 from sqlalchemy.orm import Session
 from typing import List
 from app.db.session import get_db
-from app.db.models import ModelMeta, Run, Project, Artifact, Dataset, ProjectDataset
+from app.db.models import ModelMeta, Run, Project, Artifact, Dataset, ProjectDataset, PredictionResult
 from app.schemas.models import (
     ModelMeta as ModelMetaSchema,
     PredictRequest,
@@ -112,7 +112,7 @@ def predict(model_id: str, request: PredictRequest, db: Session = Depends(get_db
 
     # Load model from storage
     model_bytes = storage.get_object(model_meta.storage_key)
-    model = joblib.load(io.BytesIO(model_bytes))  # type: ignore
+    model = joblib.load(model_bytes)  # type: ignore
 
     # Prepare input data
     input_df = pd.DataFrame(request.data)
@@ -122,6 +122,17 @@ def predict(model_id: str, request: PredictRequest, db: Session = Depends(get_db
 
     # Generate summary
     summary = MLService.generate_prediction_summary(predictions)
+
+    # Save prediction result to database
+    prediction_result = PredictionResult(
+        model_id=model_id,
+        user_id=current_user.id,
+        input_data=request.data,
+        predictions=predictions.tolist(),
+        summary=summary
+    )
+    db.add(prediction_result)
+    db.commit()
 
     return PredictResponse(predictions=predictions.tolist(), summary=summary)
 
@@ -155,13 +166,29 @@ def predict_from_file(
 
     # Load model and predict
     model_bytes = storage.get_object(model_meta.storage_key)
-    model = joblib.load(io.BytesIO(model_bytes))  # type: ignore
+    model = joblib.load(model_bytes)  # type: ignore
 
     input_df = pd.DataFrame(data)
-    predictions = model.predict(input_df)  # type: ignore
+    # Filter to only numeric columns, as the model was trained on numeric features only
+    numeric_cols = input_df.select_dtypes(include=['number']).columns
+    if len(numeric_cols) == 0:
+        raise HTTPException(status_code=400, detail="No numeric columns found in uploaded data. Model requires numeric features.")
+    input_df_numeric = input_df[numeric_cols]
+    predictions = model.predict(input_df_numeric)  # type: ignore
 
     # Generate summary
     summary = MLService.generate_prediction_summary(predictions)
+
+    # Save prediction result to database
+    prediction_result = PredictionResult(
+        model_id=model_id,
+        user_id=current_user.id,
+        input_data=data,
+        predictions=predictions.tolist(),
+        summary=summary
+    )
+    db.add(prediction_result)
+    db.commit()
 
     return PredictResponse(predictions=predictions.tolist(), summary=summary)
 

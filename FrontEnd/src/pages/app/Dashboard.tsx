@@ -31,7 +31,7 @@ export default function Dashboard() {
           { label: "Active Projects", value: statsData.activeProjects.toString(), icon: FolderKanban, color: "text-primary" },
           { label: "Datasets", value: statsData.datasetsUsed.toString(), icon: Database, color: "text-accent" },
           { label: "Trained Models", value: statsData.modelsTraining.toString(), icon: Brain, color: "text-primary" },
-          { label: "Data Quality", value: statsData.avgDataQuality, icon: TrendingUp, color: "text-accent" },
+          { label: "Success Rate", value: statsData.successRate, icon: TrendingUp, color: "text-accent" },
         ]);
 
         // Fetch recent projects

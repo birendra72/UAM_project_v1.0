@@ -38,6 +38,57 @@ export interface Notification {
   created_at: string;
 }
 
+export interface PredictionSummary {
+  total_predictions: number;
+  prediction_types: {
+    numeric?: {
+      min: number;
+      max: number;
+      mean: number;
+      median: number;
+      std: number;
+      q25: number;
+      q75: number;
+      unique_values: number;
+      range: number;
+    };
+    categorical?: {
+      unique_values: number;
+      most_common: string;
+      least_common: string;
+      distribution: Record<string, number>;
+      percentages: Record<string, number>;
+      entropy: number;
+    };
+  };
+  statistics: {
+    prediction_ranges?: {
+      low: string;
+      medium: string;
+      high: string;
+    };
+    class_distribution?: {
+      majority_class: string;
+      majority_percentage: number;
+      minority_class: string;
+      minority_percentage: number;
+    };
+    data_quality: {
+      has_null_predictions: boolean;
+      prediction_variance?: number;
+      outlier_count?: number;
+    };
+  };
+  confidence?: {
+    mean_confidence: number;
+    min_confidence: number;
+    max_confidence: number;
+    std_confidence: number;
+    high_confidence_ratio: number;
+    low_confidence_ratio: number;
+  };
+}
+
 class ApiClient {
   private baseURL: string;
 
@@ -101,6 +152,37 @@ class ApiClient {
 
   async getCurrentUser(): Promise<User> {
     return this.request<User>('/api/auth/me');
+  }
+
+  async updateUserProfile(data: Partial<User>): Promise<User> {
+    return this.request<User>('/api/auth/me', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async changePassword(data: { current_password: string; new_password: string }): Promise<{ message: string }> {
+    return this.request<{ message: string }>('/api/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteAccount(): Promise<void> {
+    const currentUser = await this.getCurrentUser();
+    const token = localStorage.getItem('access_token');
+    const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
+
+    const response = await fetch(`${this.baseURL}/api/auth/users/${currentUser.id}`, {
+      method: 'DELETE',
+      headers,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Delete failed: ${response.status}`);
+    }
+
+    // No return for 204 No Content
   }
 
   // Projects endpoints
@@ -361,6 +443,7 @@ class ApiClient {
     datasetsUsed: number;
     modelsTraining: number;
     avgDataQuality: string;
+    successRate: string;
     topModelType: string;
   }> {
     return this.request<{
@@ -368,6 +451,7 @@ class ApiClient {
       datasetsUsed: number;
       modelsTraining: number;
       avgDataQuality: string;
+      successRate: string;
       topModelType: string;
     }>('/api/projects/overview-stats');
   }
@@ -388,55 +472,7 @@ class ApiClient {
     }>>('/api/projects/recent-projects');
   }
 
-  // Reports endpoints
-  async getProjectReports(projectId: string): Promise<Array<{
-    id: string;
-    filename: string;
-    storage_key: string;
-    created_at: string;
-    metadata: Record<string, unknown>;
-  }>> {
-    return this.request<Array<{
-      id: string;
-      filename: string;
-      storage_key: string;
-      created_at: string;
-      metadata: Record<string, unknown>;
-    }>>(`/api/reports/projects/${projectId}/reports`);
-  }
 
-  async generateProjectReport(projectId: string, includeEDA: boolean, includeModels: boolean, format: string): Promise<{
-    message: string;
-    report_key: string;
-    format: string;
-    artifact_id: string;
-  }> {
-    return this.request<{
-      message: string;
-      report_key: string;
-      format: string;
-      artifact_id: string;
-    }>(`/api/reports/projects/${projectId}/generate`, {
-      method: 'POST',
-      body: JSON.stringify({
-        include_eda: includeEDA,
-        include_models: includeModels,
-        format_type: format
-      }),
-    });
-  }
-
-  async getReportDownloadUrl(artifactId: string): Promise<{
-    download_url: string;
-    filename: string;
-    content_type: string;
-  }> {
-    return this.request<{
-      download_url: string;
-      filename: string;
-      content_type: string;
-    }>(`/api/reports/${artifactId}/download`);
-  }
 
   // EDA endpoints
   async generateEDA(projectId: string): Promise<{ message: string; run_id?: string }> {
@@ -719,6 +755,347 @@ class ApiClient {
     return this.request<Record<string, Record<string, unknown>>>(`/api/analysis/projects/ml/hyperparameter-spaces/${taskType}`);
   }
 
+  //Export terms
+  async exportDataset(datasetId: string, format: string = 'csv'): Promise<void> {
+    const token = localStorage.getItem('access_token');
+    const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
+
+    const response = await fetch(`${this.baseURL}/api/datasets/${datasetId}/export?format=${format}`, {
+      method: 'GET',
+      headers,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Export failed: ${response.status}`);
+    }
+
+    // Get filename from Content-Disposition header
+    const contentDisposition = response.headers.get('Content-Disposition');
+    let filename = `dataset_export.${format}`;
+    if (contentDisposition) {
+      const filenameMatch = contentDisposition.match(/filename="([^"]+)"/);
+      if (filenameMatch) {
+        filename = filenameMatch[1];
+      }
+    }
+
+    // Create blob and download
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  }
+
+  async getChartExportUrl(projectId: string, chartType: string, format: string = 'png'): Promise<{
+    download_url: string;
+    filename: string;
+    content_type: string;
+    chart_type: string;
+  }> {
+    return this.request<{
+      download_url: string;
+      filename: string;
+      content_type: string;
+      chart_type: string;
+    }>(`/api/visualizations/projects/${projectId}/export-chart?chart_type=${chartType}&format=${format}`);
+  }
+
+  async getProjectExportUrl(projectId: string, format: string = 'json'): Promise<{
+    download_url: string;
+    filename: string;
+    content_type: string;
+    expires_in: number;
+  }> {
+    return this.request<{
+      download_url: string;
+      filename: string;
+      content_type: string;
+      expires_in: number;
+    }>(`/api/projects/${projectId}/export?format=${format}`);
+  }
+
+  async getProjectReports(projectId: string): Promise<{
+    id: string;
+    filename: string;
+    storage_key: string;
+    created_at: string;
+    metadata: {
+      format: string;
+      includes_eda?: boolean;
+      includes_models?: boolean;
+      generated_at: string;
+      type: string;
+    };
+  }[]> {
+    return this.request<{
+      id: string;
+      filename: string;
+      storage_key: string;
+      created_at: string;
+      metadata: {
+        format: string;
+        includes_eda?: boolean;
+        includes_models?: boolean;
+        generated_at: string;
+        type: string;
+      };
+    }[]>(`/api/projects/${projectId}/reports`);
+  }
+
+  async deleteReport(artifactId: string): Promise<{ message: string }> {
+    const token = localStorage.getItem('access_token');
+    const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
+
+    const response = await fetch(`${this.baseURL}/api/reports/${artifactId}/delete`, {
+      method: 'DELETE',
+      headers,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Delete failed: ${response.status}`);
+    }
+
+    return response.json();
+  }
+
+  async generateProjectReport(projectId: string, includeEDA: boolean, includeModels: boolean, format: string): Promise<{
+    message: string;
+    report_key: string;
+    format: string;
+    artifact_id: string;
+  }> {
+    const query = new URLSearchParams({
+      include_eda: includeEDA.toString(),
+      include_models: includeModels.toString(),
+      format_type: format,
+    });
+    return this.request<{
+      message: string;
+      report_key: string;
+      format: string;
+      artifact_id: string;
+    }>(`/api/reports/projects/${projectId}/generate?${query}`, {
+      method: 'POST',
+    });
+  }
+
+  async getReportDownloadUrl(reportKey: string): Promise<{
+    download_url: string;
+    filename: string;
+    content_type: string;
+  }> {
+    // For local storage, download directly from the endpoint
+    const baseUrl = this.baseURL;
+    return {
+      download_url: `${baseUrl}/api/reports/${reportKey}/download`,
+      filename: `report_${reportKey}.pdf`,
+      content_type: 'application/pdf'
+    };
+  }
+
+  // ... (Around line 600, after getReportDownloadUrl)
+
+async downloadReportFile(artifactId: string): Promise<{ blob: Blob, filename: string }> {
+    const token = localStorage.getItem('access_token');
+    const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
+
+    const response = await fetch(`${this.baseURL}/api/reports/${artifactId}/download`, {
+        method: 'GET',
+        headers,
+    });
+
+    if (!response.ok) {
+        // IMPORTANT: Read error as JSON first if status is not 200
+        const errorText = await response.text();
+        throw new Error(`Report download failed: ${response.status} - ${errorText.substring(0, 100)}`);
+    }
+
+    // Get filename from Content-Disposition header
+    const contentDisposition = response.headers.get('Content-Disposition');
+    let filename = `report_${artifactId}.pdf`; // Default fallback
+    if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="([^"]+)"/);
+        if (filenameMatch) {
+            filename = filenameMatch[1];
+        }
+    }
+
+    const blob = await response.blob();
+    return { blob, filename };
+}
+
+// ... (Around line 650, add the preview logic)
+
+async getReportPreviewContent(artifactId: string): Promise<string | Blob> {
+    const token = localStorage.getItem('access_token');
+    const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
+
+    const response = await fetch(`${this.baseURL}/api/reports/${artifactId}/preview`, {
+        method: 'GET',
+        headers,
+    });
+    
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Report preview failed: ${response.status} - ${errorText.substring(0, 100)}`);
+    }
+
+    const contentType = response.headers.get('Content-Type');
+    
+    // For PDF, return the blob so the client can create a local URL
+    if (contentType && contentType.includes('application/pdf')) {
+        return response.blob();
+    }
+    
+    // For HTML, return text
+    return response.text();
+}
+
+async exportPredictionSummary(projectId: string, format: string = 'pdf'): Promise<{
+  message: string;
+  report_key: string;
+  format: string;
+  artifact_id: string;
+}> {
+  const query = new URLSearchParams({
+    format_type: format,
+  });
+  return this.request<{
+    message: string;
+    report_key: string;
+    format: string;
+    artifact_id: string;
+  }>(`/api/projects/${projectId}/prediction-summary/export?${query}`, {
+    method: 'POST',
+  });
+}
+
+
+async getAvailableCharts(projectId: string): Promise<{
+    available_charts: Array<{
+      type: string;
+      name: string;
+      description: string;
+    }>;
+  }> {
+    return this.request<{
+      available_charts: Array<{
+        type: string;
+        name: string;
+        description: string;
+      }>;
+    }>(`/api/visualizations/projects/${projectId}/available-charts`);
+  }
+
+async getPredictionSummary(projectId: string): Promise<{
+  total_predictions: number;
+  prediction_types: {
+    numeric?: {
+      min: number;
+      max: number;
+      mean: number;
+      median: number;
+      std: number;
+      q25: number;
+      q75: number;
+      unique_values: number;
+      range: number;
+    };
+    categorical?: {
+      unique_values: number;
+      most_common: string;
+      least_common: string;
+      distribution: Record<string, number>;
+      percentages: Record<string, number>;
+      entropy: number;
+    };
+  };
+  statistics: {
+    prediction_ranges?: {
+      low: string;
+      medium: string;
+      high: string;
+    };
+    class_distribution?: {
+      majority_class: string;
+      majority_percentage: number;
+      minority_class: string;
+      minority_percentage: number;
+    };
+    data_quality: {
+      has_null_predictions: boolean;
+      prediction_variance?: number;
+      outlier_count?: number;
+    };
+  };
+  confidence?: {
+    mean_confidence: number;
+    min_confidence: number;
+    max_confidence: number;
+    std_confidence: number;
+    high_confidence_ratio: number;
+    low_confidence_ratio: number;
+  };
+}> {
+  return this.request<{
+    total_predictions: number;
+    prediction_types: {
+      numeric?: {
+        min: number;
+        max: number;
+        mean: number;
+        median: number;
+        std: number;
+        q25: number;
+        q75: number;
+        unique_values: number;
+        range: number;
+      };
+      categorical?: {
+        unique_values: number;
+        most_common: string;
+        least_common: string;
+        distribution: Record<string, number>;
+        percentages: Record<string, number>;
+        entropy: number;
+      };
+    };
+    statistics: {
+      prediction_ranges?: {
+        low: string;
+        medium: string;
+        high: string;
+      };
+      class_distribution?: {
+        majority_class: string;
+        majority_percentage: number;
+        minority_class: string;
+        minority_percentage: number;
+      };
+      data_quality: {
+        has_null_predictions: boolean;
+        prediction_variance?: number;
+        outlier_count?: number;
+      };
+    };
+    confidence?: {
+      mean_confidence: number;
+      min_confidence: number;
+      max_confidence: number;
+      std_confidence: number;
+      high_confidence_ratio: number;
+      low_confidence_ratio: number;
+    };
+  }>(`/api/projects/${projectId}/prediction-summary`);
+}
+
+
+  
   // Advanced metrics endpoints
   async calculateAdvancedMetrics(projectId: string, modelId: string, taskType: string, targetColumn: string): Promise<{
     model_id: string;

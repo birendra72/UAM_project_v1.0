@@ -130,6 +130,34 @@ def run_eda_sync(run_id: str):
 
 router = APIRouter()
 
+@router.get("/")
+def list_analysis(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """
+    List all analysis runs for the current user
+    """
+    # Get all analysis runs for the user's projects
+    runs = db.query(Run).join(Project).filter(
+        Project.user_id == current_user.id
+    ).all()
+
+    return [
+        {
+            "id": run.id,
+            "project_id": run.project_id,
+            "dataset_id": run.dataset_id,
+            "status": run.status,
+            "current_task": run.current_task,
+            "progress": run.progress,
+            "started_at": str(run.started_at) if run.started_at else None,
+            "finished_at": str(run.finished_at) if run.finished_at else None,
+            "parameters_json": run.parameters_json
+        }
+        for run in runs
+    ]
+
 @router.post("/eda")
 async def start_eda(
     dataset_id: str,

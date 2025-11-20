@@ -100,6 +100,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     // Optionally clear all queries: queryClient.clear();
   };
 
+  const updateUser = (user: User) => {
+    setAuthState(prev => ({
+      ...prev,
+      user,
+      role: user.role,
+    }));
+  };
+
   useEffect(() => {
     verifyUser(); // Auto-verify on mount
   }, [verifyUser]);
@@ -109,6 +117,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     login,
     logout,
     verifyUser,
+    updateUser,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

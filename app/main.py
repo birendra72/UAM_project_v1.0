@@ -4,7 +4,7 @@ from fastapi.staticfiles import StaticFiles
 import logging
 
 from app.config import settings
-from app.routers import auth, projects, datasets, runs, stocks, models, reports, analysis, templates, admin
+from app.routers import auth, projects, datasets, runs, stocks, models, reports, analysis, templates, admin, visualizations
 
 app = FastAPI(
     title="Universal Analyst Model (UAM) Backend",
@@ -24,9 +24,14 @@ origins = [
     "http://localhost:5173",
     "http://localhost:3000",
     "http://localhost:8080",
+    "http://localhost:8081",
+    "http://172.17.112.1:8080",
     "http://172.17.240.1:8080",
     "http://172.18.128.1:8080",
+    "http://172.31.64.1:8081",
+    "http://172.31.64.1:8080",
     "http://192.168.31.9:8080",
+    "http://192.168.31.9:8081",
     "https://uam-project-v1-0.vercel.app",  # Production frontend
 ]
 
@@ -49,6 +54,7 @@ app.include_router(reports.router, prefix="/api/reports", tags=["reports"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
 app.include_router(templates.router, prefix="/api/templates", tags=["templates"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
+app.include_router(visualizations.router, prefix="/api/visualizations", tags=["visualizations"])
 
 # Mount static files for serving artifacts
 app.mount("/files", StaticFiles(directory="./storage"), name="files")

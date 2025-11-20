@@ -3,7 +3,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ArrowLeft, Database, BarChart, Brain, Download, Play, Loader2, Upload, Eye, Trash2, Plus, Minus } from "lucide-react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api";
 import { useState, useCallback } from "react";
@@ -36,9 +36,22 @@ interface Dataset {
 
 export default function ProjectOverview() {
   const { projectId } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [selectedDataset, setSelectedDataset] = useState<Dataset | null>(null);
   const queryClient = useQueryClient();
+
+  // Get tab from URL params, default to "data"
+  const activeTab = searchParams.get("tab") || "data";
+  const activeSubTab = searchParams.get("subtab") || "train";
+
+  const handleTabChange = (newTab: string) => {
+    setSearchParams({ tab: newTab });
+  };
+
+  const handleSubTabChange = (newSubTab: string) => {
+    setSearchParams({ tab: activeTab, subtab: newSubTab });
+  };
 
   const { data: project, isLoading: projectLoading, error: projectError } = useQuery<Project>({
     queryKey: ["project", projectId],
@@ -206,7 +219,7 @@ export default function ProjectOverview() {
           </Card>
         </div>
 
-        <Tabs defaultValue="data" className="w-full">
+        <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
           <TabsList className="grid w-full grid-cols-6">
             <TabsTrigger value="data">Data</TabsTrigger>
             <TabsTrigger value="explore">Explore</TabsTrigger>
@@ -286,7 +299,7 @@ export default function ProjectOverview() {
                       <div className="flex items-center space-x-2">
                         <Button variant="outline" size="sm" className="flex-1 gap-2" onClick={() => handlePreviewClick(dataset)}>
                           <Eye className="h-3 w-3" />
-                          Preview
+                          Preview & Operations
                         </Button>
                         <Button
                           variant="outline"

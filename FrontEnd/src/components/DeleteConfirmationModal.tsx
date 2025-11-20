@@ -6,10 +6,12 @@ interface DeleteConfirmationModalProps {
   isOpen: boolean;
   onClose: () => void;
   onConfirm: () => void;
-  datasetName: string;
+  // datasetName: string;
+  itemName:   string;
+  itemType: string;
 }
 
-export default function DeleteConfirmationModal({ isOpen, onClose, onConfirm, datasetName }: DeleteConfirmationModalProps) {
+export default function DeleteConfirmationModal({ isOpen, onClose, onConfirm, itemName, itemType = "dataset" }: DeleteConfirmationModalProps) {
   if (!isOpen) return null;
 
   return (
@@ -21,11 +23,12 @@ export default function DeleteConfirmationModal({ isOpen, onClose, onConfirm, da
           </div>
           <div className="ml-4 text-left">
             <h3 className="text-xl font-bold text-foreground" id="modal-title">
-              Delete Dataset
+              Delete {itemType === 'report' ? 'Report' : 'Dataset'}
             </h3>
             <div className="mt-2">
               <p className="text-sm text-muted-foreground">
-                Are you sure you want to delete <strong className="text-foreground">{datasetName}</strong>? This action cannot be undone. All associated projects and models will also be affected.
+                Are you sure you want to delete <strong className="text-foreground">{itemName}</strong>? This action cannot be undone.
+                {itemType === 'report' ? ' The report file will be permanently removed.' : ' All associated projects and models will also be affected.'}
               </p>
             </div>
           </div>
