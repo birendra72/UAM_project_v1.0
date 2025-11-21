@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 import logging
 
 from app.config import settings
@@ -26,13 +27,16 @@ origins = [
     "http://localhost:8080",
     "http://localhost:8081",
     "http://172.17.112.1:8080",
+    "http://172.27.160.1:8080",
     "http://172.17.240.1:8080",
     "http://172.18.128.1:8080",
     "http://172.31.64.1:8081",
     "http://172.31.64.1:8080",
     "http://192.168.31.9:8080",
     "http://192.168.31.9:8081",
-    "https://uam-project-v1-0.vercel.app",  # Production frontend
+    # Production frontend
+    "https://uam-project-v1-0.vercel.app",
+    "https://uam-project-v1-0.vercel.app/login", 
 ]
 
 app.add_middleware(
@@ -56,8 +60,12 @@ app.include_router(templates.router, prefix="/api/templates", tags=["templates"]
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 app.include_router(visualizations.router, prefix="/api/visualizations", tags=["visualizations"])
 
-# Mount static files for serving artifacts
-app.mount("/files", StaticFiles(directory="./storage"), name="files")
+# Mount static files for serving artifacts (only in local development)
+if not settings.USE_MINIO:
+    app.mount("/files", StaticFiles(directory="./storage"), name="files")
+
+# Mount frontend static files for production (assets, js, css)
+app.mount("/assets", StaticFiles(directory="FrontEnd/dist/assets"), name="assets")
 
 @app.get("/")
 def read_root():
