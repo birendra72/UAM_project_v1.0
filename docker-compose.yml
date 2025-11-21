@@ -1,7 +1,7 @@
 services:
   web:
     build: .
-    command: ./entrypoint.sh uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: ./entrypoint.sh uvicorn app.main:app --host 0.0.0.0 --port 8000
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=${REDIS_URL}
