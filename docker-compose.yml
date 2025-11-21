@@ -1,7 +1,7 @@
 services:
   web:
     build: .
-    command: ./entrypoint.sh gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT
+    command: ./entrypoint.sh uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=${REDIS_URL}
