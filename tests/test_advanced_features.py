@@ -241,3 +241,113 @@ def test_predict_validation_and_reordering_flow(client, db):
     assert "insights" in valid_data["summary"]
     assert len(valid_data["summary"]["insights"]) > 0
 
+
+def test_data_science_advanced_features(client, db):
+    # 1. Register & login
+    reg_resp = client.post("/api/auth/register", json={
+        "name": "Test Data Science User",
+        "email": "test_ds@example.com",
+        "password": "password123"
+    })
+    assert reg_resp.status_code == 200
+    token = reg_resp.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Get user object to retrieve ID
+    user_resp = client.get("/api/auth/me", headers=headers)
+    user_id = user_resp.json()["id"]
+
+    # 2. Create project & upload a dummy dataset
+    proj_resp = client.post("/api/projects/", headers=headers, json={
+        "name": "DS Proj",
+        "description": "Data Science Proj"
+    })
+    assert proj_resp.status_code == 200
+    project_id = proj_resp.json()["id"]
+
+    # Create dummy dataframe with outliers, skewness, and high correlation
+    data = {
+        "normal_feat": [1.0, 1.2, 0.9, 1.1, 1.0, 0.8, 1.3, 1.0, 1.1, 0.9],
+        "skewed_feat": [1.0, 1.5, 2.0, 1.2, 1.4, 25.0, 1.1, 1.3, 1.6, 22.0], # highly skewed
+        "redundant_feat": [2.0, 2.4, 1.8, 2.2, 2.0, 1.6, 2.6, 2.0, 2.2, 1.8], # correlated with normal_feat
+        "category_feat": ["A", "B", "A", "A", "B", "A", "B", "A", "A", "B"]
+    }
+    df = pd.DataFrame(data)
+    csv_buf = io.BytesIO()
+    df.to_csv(csv_buf, index=False)
+    csv_buf.seek(0)
+
+    dataset_resp = client.post(
+        f"/api/datasets/upload?project_id={project_id}",
+        headers=headers,
+        files={"file": ("ds_test.csv", csv_buf, "text/csv")}
+    )
+    assert dataset_resp.status_code == 200
+    dataset_id = dataset_resp.json()["id"]
+
+    # 3. Test GET quality score
+    quality_resp = client.get(f"/api/datasets/{dataset_id}/quality-score", headers=headers)
+    assert quality_resp.status_code == 200
+    quality_data = quality_resp.json()
+    assert "score" in quality_data
+    assert "breakdown" in quality_data
+    assert "rules_checked" in quality_data
+    assert len(quality_data["rules_checked"]) == 5
+    assert "recommendations" in quality_data
+
+    # 4. Test GET feature suggestions
+    sugg_resp = client.get(f"/api/datasets/{dataset_id}/feature-suggestions", headers=headers)
+    assert sugg_resp.status_code == 200
+    sugg_data = sugg_resp.json()
+    assert len(sugg_data) > 0
+    assert "transformation" in sugg_data[0]
+    assert "column" in sugg_data[0]
+
+    # 5. Test apply transformations
+    transformations = [
+        {"column": "skewed_feat", "transformation": "log_transform"},
+        {"column": "category_feat", "transformation": "one_hot_encode"}
+    ]
+    apply_resp = client.post(
+        f"/api/datasets/{dataset_id}/apply-features",
+        headers=headers,
+        json=transformations
+    )
+    assert apply_resp.status_code == 200
+    apply_data = apply_resp.json()
+    assert apply_data["version"] >= 1
+    assert len(apply_data["applied_operations"]) == 2
+
+    # 6. Test compare drift
+    # Upload a target dataset with different distribution (shifted)
+    target_data = {
+        "normal_feat": [5.0, 5.2, 4.9, 5.1, 5.0, 4.8, 5.3, 5.0, 5.1, 4.9], # shifted mean from ~1 to ~5
+        "skewed_feat": [1.0, 1.5, 2.0, 1.2, 1.4, 25.0, 1.1, 1.3, 1.6, 22.0],
+        "redundant_feat": [2.0, 2.4, 1.8, 2.2, 2.0, 1.6, 2.6, 2.0, 2.2, 1.8],
+        "category_feat": ["B", "B", "B", "B", "B", "B", "B", "B", "B", "B"] # shifted distribution
+    }
+    df_target = pd.DataFrame(target_data)
+    csv_buf_target = io.BytesIO()
+    df_target.to_csv(csv_buf_target, index=False)
+    csv_buf_target.seek(0)
+
+    target_resp = client.post(
+        f"/api/datasets/upload?project_id={project_id}",
+        headers=headers,
+        files={"file": ("ds_target.csv", csv_buf_target, "text/csv")}
+    )
+    assert target_resp.status_code == 200
+    target_id = target_resp.json()["id"]
+
+    drift_resp = client.post(
+        f"/api/datasets/{dataset_id}/compare-drift/{target_id}",
+        headers=headers
+    )
+    assert drift_resp.status_code == 200
+    drift_data = drift_resp.json()
+    assert "drift_detected" in drift_data
+    assert "drift_score" in drift_data
+    assert "metrics" in drift_data
+    assert "normal_feat" in drift_data["metrics"]
+    assert drift_data["metrics"]["normal_feat"]["drifted"] is True # should detect drift due to shift
+

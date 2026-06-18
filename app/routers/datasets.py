@@ -7,6 +7,7 @@ from app.schemas.datasets import Dataset as DatasetSchema, DatasetPreview
 from app.dependencies.auth import get_current_user
 from app.services.dataset_service import DatasetService
 from app.services.data_validation_service import DataValidationService
+from app.services.data_science_service import DataScienceService
 
 router = APIRouter()
 
@@ -157,5 +158,51 @@ def get_dataset_summary(
 ):
     try:
         return DatasetService.get_dataset_summary(dataset_id, current_user.id, db)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/{dataset_id}/quality-score")
+def get_dataset_quality_score(
+    dataset_id: str,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    try:
+        return DataScienceService.get_quality_score(dataset_id, current_user.id, db)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/{dataset_id}/feature-suggestions")
+def get_feature_suggestions(
+    dataset_id: str,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    try:
+        return DataScienceService.get_feature_suggestions(dataset_id, current_user.id, db)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/{dataset_id}/apply-features")
+def apply_feature_transformations(
+    dataset_id: str,
+    transformations: List[dict],
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    try:
+        return DataScienceService.apply_feature_transformations(dataset_id, transformations, current_user.id, db)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/{dataset_id}/compare-drift/{target_id}")
+def detect_data_drift(
+    dataset_id: str,
+    target_id: str,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    try:
+        return DataScienceService.detect_data_drift(dataset_id, target_id, current_user.id, db)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
