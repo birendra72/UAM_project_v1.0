@@ -35,27 +35,35 @@ def upgrade() -> None:
         SELECT project_id, id FROM datasets
     """)
 
-    # Drop the foreign key constraint and column directly (SQLite compatible)
-    op.execute("PRAGMA foreign_keys=off")
-    op.execute("""
-        CREATE TABLE datasets_new (
-            id VARCHAR NOT NULL,
-            filename VARCHAR NOT NULL,
-            storage_key VARCHAR NOT NULL,
-            rows INTEGER,
-            cols INTEGER,
-            columns_json JSON,
-            uploaded_at DATETIME DEFAULT (CURRENT_TIMESTAMP),
-            PRIMARY KEY (id)
-        )
-    """)
-    op.execute("""
-        INSERT INTO datasets_new (id, filename, storage_key, rows, cols, columns_json, uploaded_at)
-        SELECT id, filename, storage_key, rows, cols, columns_json, uploaded_at FROM datasets
-    """)
-    op.execute("DROP TABLE datasets")
-    op.execute("ALTER TABLE datasets_new RENAME TO datasets")
-    op.execute("PRAGMA foreign_keys=on")
+    # Check if dialect is SQLite or PostgreSQL
+    bind = op.get_bind()
+    is_sqlite = bind.dialect.name == "sqlite"
+
+    if is_sqlite:
+        # Drop the foreign key constraint and column directly (SQLite compatible)
+        op.execute("PRAGMA foreign_keys=off")
+        op.execute("""
+            CREATE TABLE datasets_new (
+                id VARCHAR NOT NULL,
+                filename VARCHAR NOT NULL,
+                storage_key VARCHAR NOT NULL,
+                rows INTEGER,
+                cols INTEGER,
+                columns_json JSON,
+                uploaded_at DATETIME DEFAULT (CURRENT_TIMESTAMP),
+                PRIMARY KEY (id)
+            )
+        """)
+        op.execute("""
+            INSERT INTO datasets_new (id, filename, storage_key, rows, cols, columns_json, uploaded_at)
+            SELECT id, filename, storage_key, rows, cols, columns_json, uploaded_at FROM datasets
+        """)
+        op.execute("DROP TABLE datasets")
+        op.execute("ALTER TABLE datasets_new RENAME TO datasets")
+        op.execute("PRAGMA foreign_keys=on")
+    else:
+        # PostgreSQL: simply drop the column (Postgres handles constraint dropping automatically)
+        op.drop_column('datasets', 'project_id')
 
 
 def downgrade() -> None:
