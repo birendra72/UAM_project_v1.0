@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from datetime import timedelta
 
@@ -8,11 +8,13 @@ from app.db.models import User as UserModel
 from app.utils.auth import verify_password, get_password_hash, create_access_token
 from app.dependencies.auth import get_current_user
 from app.config import settings
+from app.utils.limiter import limiter
 
 router = APIRouter()
 
 @router.post("/register", response_model=Token)
-def register(user_create: UserCreate, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def register(request: Request, user_create: UserCreate, db: Session = Depends(get_db)):
     user = db.query(UserModel).filter(UserModel.email == user_create.email).first()
     if user:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -37,7 +39,8 @@ def options_register():
     return {}
 
 @router.post("/login", response_model=Token)
-def login(user_login: UserLogin, db: Session = Depends(get_db)):
+@limiter.limit("15/minute")
+def login(request: Request, user_login: UserLogin, db: Session = Depends(get_db)):
     user = db.query(UserModel).filter(UserModel.email == user_login.email).first()
     if not user:
         raise HTTPException(status_code=400, detail="Incorrect email or password")

@@ -422,6 +422,18 @@ async def train_auto_ml(
     if not task_type or not target_column:
         raise HTTPException(status_code=400, detail="task_type and target_column are required")
 
+    try:
+        test_size = float(test_size)
+        if not (0.0 < test_size < 1.0):
+            raise ValueError()
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="test_size must be a float between 0.0 and 1.0 (exclusive)")
+
+    try:
+        random_state = int(random_state)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="random_state must be a valid integer")
+
     # Validate task type and target column compatibility
     try:
         # Get task analysis to check compatibility
@@ -616,6 +628,18 @@ async def train_with_custom_hyperparameters(
 
     if not task_type or not target_column:
         raise HTTPException(status_code=400, detail="task_type and target_column are required")
+
+    try:
+        test_size = float(test_size)
+        if not (0.0 < test_size < 1.0):
+            raise ValueError()
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="test_size must be a float between 0.0 and 1.0 (exclusive)")
+
+    try:
+        random_state = int(random_state)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="random_state must be a valid integer")
 
     # Validate task type and target column compatibility
     try:

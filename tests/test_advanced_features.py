@@ -351,3 +351,91 @@ def test_data_science_advanced_features(client, db):
     assert "normal_feat" in drift_data["metrics"]
     assert drift_data["metrics"]["normal_feat"]["drifted"] is True # should detect drift due to shift
 
+
+def test_automl_validation(client):
+    # 1. Register and get token
+    reg_resp = client.post("/api/auth/register", json={
+        "name": "Test User AutoML Val",
+        "email": "test_automl_val@example.com",
+        "password": "password123"
+    })
+    assert reg_resp.status_code == 200
+    token = reg_resp.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 2. Create a project
+    proj_resp = client.post("/api/projects/", headers=headers, json={
+        "name": "Test Project AutoML Val",
+        "description": "AutoML validation test project"
+    })
+    assert proj_resp.status_code == 200
+    project_id = proj_resp.json()["id"]
+
+    # 3. Test invalid test_size
+    response = client.post(
+        f"/api/analysis/projects/{project_id}/ml/train-auto",
+        headers=headers,
+        json={
+            "task_type": "regression",
+            "target_column": "target",
+            "test_size": 1.5,
+            "random_state": 42
+        }
+    )
+    assert response.status_code == 400
+    assert "test_size must be a float between 0.0 and 1.0" in response.json()["detail"]
+
+    # 4. Test invalid random_state
+    response2 = client.post(
+        f"/api/analysis/projects/{project_id}/ml/train-auto",
+        headers=headers,
+        json={
+            "task_type": "regression",
+            "target_column": "target",
+            "test_size": 0.2,
+            "random_state": "invalid_int"
+        }
+    )
+    assert response2.status_code == 400
+    assert "random_state must be a valid integer" in response2.json()["detail"]
+
+
+def test_empty_and_null_datasets(client):
+    # 1. Register & login
+    reg_resp = client.post("/api/auth/register", json={
+        "name": "Test User Empty Dataset",
+        "email": "test_empty_ds@example.com",
+        "password": "password123"
+    })
+    assert reg_resp.status_code == 200
+    token = reg_resp.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 2. Create project
+    proj_resp = client.post("/api/projects/", headers=headers, json={
+        "name": "Empty DS Proj",
+        "description": "Project for empty datasets"
+    })
+    assert proj_resp.status_code == 200
+    project_id = proj_resp.json()["id"]
+
+    # 3. Try uploading empty CSV (0 rows)
+    csv_empty = io.BytesIO(b"col1,col2\n")
+    response_empty = client.post(
+        f"/api/datasets/upload?project_id={project_id}",
+        headers=headers,
+        files={"file": ("empty.csv", csv_empty, "text/csv")}
+    )
+    assert response_empty.status_code == 400
+    assert "Dataset is empty" in response_empty.json()["detail"]
+
+    # 4. Try uploading all-null CSV
+    csv_null = io.BytesIO(b"col1,col2\n,\n,\n")
+    response_null = client.post(
+        f"/api/datasets/upload?project_id={project_id}",
+        headers=headers,
+        files={"file": ("all_null.csv", csv_null, "text/csv")}
+    )
+    assert response_null.status_code == 400
+    assert "Dataset contains only null/empty values" in response_null.json()["detail"]
+

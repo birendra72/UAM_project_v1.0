@@ -41,6 +41,14 @@ export default function Dashboard() {
     updated: string;
   }>>([]);
 
+  const [leaderboard, setLeaderboard] = useState<Array<{
+    id: string;
+    name: string;
+    accuracy: number;
+    task_type: string;
+    created_at?: string;
+  }>>([]);
+
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -58,6 +66,11 @@ export default function Dashboard() {
         const projectsData = await apiClient.getRecentProjects();
         if (projectsData) {
           setRecentProjects(projectsData);
+        }
+
+        const leaderboardData = await apiClient.getLeaderboard(5);
+        if (leaderboardData) {
+          setLeaderboard(leaderboardData);
         }
       } catch (error) {
         console.error("Failed to fetch dashboard data:", error);
@@ -286,61 +299,63 @@ export default function Dashboard() {
             </div>
           </Card>
 
-          {/* Model Benchmarks Leaderboard - taking 1 col */}
+          {/* Model Benchmarks Leaderboard - dynamic from API */}
           <Card className="p-6 bg-slate-950/40 border border-slate-900 backdrop-blur-sm flex flex-col justify-between">
             <div>
               <div className="flex items-center gap-2 mb-6">
                 <Cpu className="h-5 w-5 text-pink-400" />
                 <h2 className="text-xl font-bold font-display text-slate-100">Model Leaderboard</h2>
               </div>
-              
+
               <div className="space-y-4">
-                <div className="space-y-2">
-                  <div className="flex justify-between text-xs">
-                    <span className="font-semibold text-slate-300">XGBoost Classifier</span>
-                    <span className="font-mono text-violet-400 font-bold">94.2%</span>
+                {loading ? (
+                  <div className="text-center py-6">
+                    <Activity className="h-5 w-5 animate-spin mx-auto text-pink-400 mb-2" />
+                    <p className="text-xs text-slate-500 font-mono">Loading models...</p>
                   </div>
-                  <div className="w-full bg-slate-900 rounded-full h-1.5 overflow-hidden">
-                    <div className="bg-gradient-to-r from-violet-500 to-indigo-500 h-full rounded-full" style={{ width: "94.2%" }} />
+                ) : leaderboard.length > 0 ? (
+                  leaderboard.map((model, idx) => {
+                    const colors = [
+                      "from-violet-500 to-indigo-500",
+                      "from-cyan-500 to-teal-500",
+                      "from-pink-500 to-rose-500",
+                      "from-amber-500 to-orange-500",
+                      "from-emerald-500 to-green-500",
+                    ];
+                    const textColors = ["text-violet-400", "text-cyan-400", "text-pink-400", "text-amber-400", "text-emerald-400"];
+                    return (
+                      <div key={model.id} className="space-y-2">
+                        <div className="flex justify-between text-xs">
+                          <span className="font-semibold text-slate-300 truncate max-w-[140px]" title={model.name}>
+                            {model.name}
+                          </span>
+                          <span className={`font-mono font-bold ${textColors[idx % textColors.length]}`}>
+                            {model.accuracy}%
+                          </span>
+                        </div>
+                        <div className="w-full bg-slate-900 rounded-full h-1.5 overflow-hidden">
+                          <div
+                            className={`bg-gradient-to-r ${colors[idx % colors.length]} h-full rounded-full transition-all duration-700`}
+                            style={{ width: `${Math.min(model.accuracy, 100)}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="text-center py-8 border border-dashed border-slate-800 rounded-xl">
+                    <Cpu className="h-7 w-7 text-slate-600 mx-auto mb-2" />
+                    <p className="text-xs text-slate-500">No models trained yet</p>
+                    <p className="text-[10px] text-slate-600 mt-1">Train a model in a project to see rankings</p>
                   </div>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex justify-between text-xs">
-                    <span className="font-semibold text-slate-300">Random Forest</span>
-                    <span className="font-mono text-cyan-400 font-bold">91.8%</span>
-                  </div>
-                  <div className="w-full bg-slate-900 rounded-full h-1.5 overflow-hidden">
-                    <div className="bg-gradient-to-r from-cyan-500 to-teal-500 h-full rounded-full" style={{ width: "91.8%" }} />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex justify-between text-xs">
-                    <span className="font-semibold text-slate-300">Logistic Regression</span>
-                    <span className="font-mono text-slate-400 font-bold">85.4%</span>
-                  </div>
-                  <div className="w-full bg-slate-900 rounded-full h-1.5 overflow-hidden">
-                    <div className="bg-slate-800 h-full rounded-full" style={{ width: "85.4%" }} />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex justify-between text-xs">
-                    <span className="font-semibold text-slate-300">Decision Tree</span>
-                    <span className="font-mono text-slate-400 font-bold">81.1%</span>
-                  </div>
-                  <div className="w-full bg-slate-900 rounded-full h-1.5 overflow-hidden">
-                    <div className="bg-slate-800 h-full rounded-full" style={{ width: "81.1%" }} />
-                  </div>
-                </div>
+                )}
               </div>
             </div>
 
             <div className="border-t border-slate-900 pt-4 mt-6">
               <div className="flex items-center justify-between text-xs text-slate-500">
                 <span>AutoML evaluation criteria</span>
-                <span className="font-semibold">Accuracy / F1</span>
+                <span className="font-semibold">Accuracy / R²</span>
               </div>
             </div>
           </Card>

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Loader2, CheckCircle, XCircle, RefreshCw, Clock } from "lucide-react";
 import { apiClient, getWsUrl } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
-import useWebSocket from "react-use-websocket";
+import useWebSocket, { ReadyState } from "react-use-websocket";
 
 interface TrainingProgressProps {
   projectId: string;
@@ -34,7 +34,7 @@ export default function TrainingProgress({ projectId, onTrainingComplete }: Trai
   const [realTimeStatus, setRealTimeStatus] = useState<TrainingStatus | null>(null);
 
   // WebSocket for real-time updates
-  const { lastMessage } = useWebSocket(getWsUrl(`/api/analysis/projects/${projectId}/ml/train-progress`), {
+  const { lastMessage, readyState } = useWebSocket(getWsUrl(`/api/analysis/projects/${projectId}/ml/train-progress`), {
     shouldReconnect: () => true,
     reconnectAttempts: 10,
     reconnectInterval: 3000,
@@ -191,7 +191,16 @@ export default function TrainingProgress({ projectId, onTrainingComplete }: Trai
   return (
     <Card className="p-6">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-semibold">Training Progress</h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-lg font-semibold">Training Progress</h3>
+          {readyState === ReadyState.OPEN ? (
+            <span className="flex items-center h-2 w-2 rounded-full bg-green-500 animate-pulse" title="Live connection" />
+          ) : readyState === ReadyState.CONNECTING ? (
+            <span className="flex items-center h-2 w-2 rounded-full bg-yellow-500 animate-pulse" title="Connecting..." />
+          ) : (
+            <span className="flex items-center h-2 w-2 rounded-full bg-gray-400" title="Offline (using polling fallback)" />
+          )}
+        </div>
         <Button
           variant="outline"
           size="sm"

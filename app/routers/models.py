@@ -74,6 +74,36 @@ def list_models(db: Session = Depends(get_db), current_user = Depends(get_curren
         ) for model in models
     ]
 
+@router.get("/leaderboard")
+def get_model_leaderboard(
+    limit: int = 5,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Return the user's top-performing models sorted by accuracy for the Dashboard leaderboard."""
+    models = (
+        db.query(ModelMeta).join(Run).join(Project)
+        .filter(Project.user_id == current_user.id)
+        .all()
+    )
+    scored = []
+    for m in models:
+        metrics = m.metrics_json or {}
+        score = metrics.get("accuracy", metrics.get("r2_score", 0))
+        try:
+            score = float(score) * 100
+        except (TypeError, ValueError):
+            score = 0.0
+        scored.append({
+            "id": str(m.id),
+            "name": m.name,
+            "accuracy": round(score, 1),
+            "task_type": metrics.get("task_type", "unknown"),
+            "created_at": m.created_at.isoformat() if m.created_at else None,
+        })
+    scored.sort(key=lambda x: x["accuracy"], reverse=True)
+    return scored[:limit]
+
 @router.post("/train")
 def train_model(
     project_id: str,

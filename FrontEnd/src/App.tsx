@@ -38,101 +38,105 @@ import AdminAnalytics from "./pages/admin/Analytics";
 
 import NotFound from "./pages/NotFound";
 
+import ErrorBoundary from "@/components/ErrorBoundary";
+
 const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider defaultTheme="dark" storageKey="uam-theme">
-      <TooltipProvider>
-        <Toaster />
-        <Sonner />
-        <AuthProvider>
-          <BrowserRouter>
-            <Routes>
-            {/* Public Routes */}
-            <Route path="/" element={<Home />} />
-            <Route path="/solutions" element={<Solutions />} />
-            <Route path="/pricing" element={<Pricing />} />
-            <Route path="/templates" element={<Templates />} />
-            <Route path="/demo" element={<Demo />} />
-            <Route path="/about" element={<About />} />
-            <Route path="/contact" element={<Contact />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
-            <Route path="/forgot-password" element={<ForgotPassword />} />
-            <Route path="/privacy" element={<Privacy />} />
-            <Route path="/terms" element={<Terms />} />
+      <ErrorBoundary>
+        <TooltipProvider>
+          <Toaster />
+          <Sonner />
+          <AuthProvider>
+            <BrowserRouter>
+              <Routes>
+              {/* Public Routes */}
+              <Route path="/" element={<Home />} />
+              <Route path="/solutions" element={<Solutions />} />
+              <Route path="/pricing" element={<Pricing />} />
+              <Route path="/templates" element={<Templates />} />
+              <Route path="/demo" element={<Demo />} />
+              <Route path="/about" element={<About />} />
+              <Route path="/contact" element={<Contact />} />
+              <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Register />} />
+              <Route path="/forgot-password" element={<ForgotPassword />} />
+              <Route path="/privacy" element={<Privacy />} />
+              <Route path="/terms" element={<Terms />} />
 
-            {/* App Routes */}
-            <Route
-              path="/app/dashboard"
-              element={
-                <ProtectedRoute>
-                  <Dashboard />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/app/projects"
-              element={
-                <ProtectedRoute>
-                  <Projects />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/app/projects/:projectId/overview"
-              element={
-                <ProtectedRoute>
-                  <ProjectOverview />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/app/datasets"
-              element={
-                <ProtectedRoute>
-                  <Datasets />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/app/models"
-              element={
-                <ProtectedRoute>
-                  <Models />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/app/templates"
-              element={
-                <ProtectedRoute>
-                  <AppTemplates />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/app/settings"
-              element={
-                <ProtectedRoute>
-                  <Settings />
-                </ProtectedRoute>
-              }
-            />
+              {/* App Routes */}
+              <Route
+                path="/app/dashboard"
+                element={
+                  <ProtectedRoute>
+                    <Dashboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/app/projects"
+                element={
+                  <ProtectedRoute>
+                    <Projects />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/app/projects/:projectId/overview"
+                element={
+                  <ProtectedRoute>
+                    <ProjectOverview />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/app/datasets"
+                element={
+                  <ProtectedRoute>
+                    <Datasets />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/app/models"
+                element={
+                  <ProtectedRoute>
+                    <Models />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/app/templates"
+                element={
+                  <ProtectedRoute>
+                    <AppTemplates />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/app/settings"
+                element={
+                  <ProtectedRoute>
+                    <Settings />
+                  </ProtectedRoute>
+                }
+              />
 
-            {/* Admin Routes */}
-            <Route path="/admin/dashboard" element={<ProtectedRoute requiredRole="Admin"><AdminDashboard /></ProtectedRoute>} />
-            <Route path="/admin/users" element={<ProtectedRoute requiredRole="Admin"><AdminUsers /></ProtectedRoute>} />
-            <Route path="/admin/templates" element={<ProtectedRoute requiredRole="Admin"><AdminTemplates /></ProtectedRoute>} />
-            <Route path="/admin/analytics" element={<ProtectedRoute requiredRole="Admin"><AdminAnalytics /></ProtectedRoute>} />
+              {/* Admin Routes */}
+              <Route path="/admin/dashboard" element={<ProtectedRoute requiredRole="Admin"><AdminDashboard /></ProtectedRoute>} />
+              <Route path="/admin/users" element={<ProtectedRoute requiredRole="Admin"><AdminUsers /></ProtectedRoute>} />
+              <Route path="/admin/templates" element={<ProtectedRoute requiredRole="Admin"><AdminTemplates /></ProtectedRoute>} />
+              <Route path="/admin/analytics" element={<ProtectedRoute requiredRole="Admin"><AdminAnalytics /></ProtectedRoute>} />
 
-            {/* 404 */}
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-            </BrowserRouter>
-          </AuthProvider>
-      </TooltipProvider>
+              {/* 404 */}
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+              </BrowserRouter>
+            </AuthProvider>
+        </TooltipProvider>
+      </ErrorBoundary>
     </ThemeProvider>
   </QueryClientProvider>
 );

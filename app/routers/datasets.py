@@ -9,6 +9,8 @@ from app.services.dataset_service import DatasetService
 from app.services.data_validation_service import DataValidationService
 from app.services.data_science_service import DataScienceService
 
+from app.config import settings
+
 router = APIRouter()
 
 @router.post("/link/{dataset_id}/{project_id}")
@@ -42,6 +44,21 @@ def upload_dataset(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
+    # Validate file size
+    try:
+        file.file.seek(0, 2)
+        file_size = file.file.tell()
+        file.file.seek(0)
+        if file_size > settings.MAX_UPLOAD_SIZE:
+            raise HTTPException(status_code=400, detail="File size exceeds maximum limit of 50MB")
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        # If seek/tell fails, fallback to header content-length check
+        cl = file.headers.get("content-length")
+        if cl and int(cl) > settings.MAX_UPLOAD_SIZE:
+            raise HTTPException(status_code=400, detail="File size exceeds maximum limit of 50MB")
+
     try:
         dataset = DatasetService.upload_dataset(file, project_id, current_user.id, db)
         return DatasetSchema.from_orm(dataset)
@@ -119,11 +136,17 @@ def delete_dataset(
 @router.get("/", response_model=List[DatasetSchema])
 def list_datasets(
     project_id: str = "",
+    page: int = 1,
+    limit: int = 20,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
     try:
-        datasets = DatasetService.list_datasets(project_id, current_user.id, db)
+        if page < 1:
+            page = 1
+        if limit < 1:
+            limit = 20
+        datasets = DatasetService.list_datasets(project_id, current_user.id, db, page, limit)
         return [DatasetSchema.from_orm(d) for d in datasets]
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

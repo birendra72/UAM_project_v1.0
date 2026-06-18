@@ -15,6 +15,7 @@ interface StatsData {
   active_projects: number;
   platform_usage: number;
   revenue: number;
+  platform_growth?: number;
 }
 
 export default function AdminDashboard() {
@@ -56,10 +57,10 @@ export default function AdminDashboard() {
       try {
         const data = await apiClient.getAdminStats() as StatsData;
         setStats([
-          { label: "Total Users", value: data.user_count.toString(), icon: Users, trend: "+12%" },
-          { label: "Active Projects", value: data.active_projects.toString(), icon: FileText, trend: "+8%" },
-          { label: "Platform Usage", value: `${data.platform_usage}%`, icon: Activity, trend: "+5%" },
-          { label: "Revenue", value: `$${data.revenue.toLocaleString()}`, icon: TrendingUp, trend: "+18%" },
+          { label: "Total Users", value: data.user_count.toString(), icon: Users, trend: `+${data.platform_growth || 0}% growth` },
+          { label: "Active Projects", value: data.active_projects.toString(), icon: FileText, trend: "Live" },
+          { label: "Platform Usage", value: `${data.platform_usage}%`, icon: Activity, trend: "Active" },
+          { label: "Revenue", value: `$${data.revenue.toLocaleString()}`, icon: TrendingUp, trend: "USD" },
         ]);
         setOffline(false);
       } catch (error) {

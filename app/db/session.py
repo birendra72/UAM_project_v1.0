@@ -11,7 +11,11 @@ if db_url.startswith("postgresql"):
     new_query = urllib.parse.urlencode(query_params, doseq=True)
     db_url = urllib.parse.urlunparse(parsed._replace(query=new_query))
 
-engine = create_engine(db_url, pool_pre_ping=True)
+connect_args = {}
+if db_url.startswith("sqlite"):
+    connect_args = {"check_same_thread": False}
+
+engine = create_engine(db_url, pool_pre_ping=True, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def get_db():

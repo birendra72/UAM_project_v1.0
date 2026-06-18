@@ -118,15 +118,26 @@ class DatasetService:
         # Save file to storage
         storage.upload_fileobj(storage_key, file.file)
 
+        # Reset pointer back to 0 so we can read it for validation and type analysis
+        try:
+            file.file.seek(0)
+        except Exception:
+            pass
+
         # Try to read with pandas for metadata and smart type detection
         try:
             df = DatasetService._read_dataframe_from_file(file.file, file.filename)
             rows, cols = df.shape
+            if rows == 0:
+                raise ValueError("Dataset is empty (contains 0 rows)")
+            if df.isnull().all().all():
+                raise ValueError("Dataset contains only null/empty values")
             columns_json = DatasetService._analyze_column_types(df)
-        except Exception:
-            rows = None
-            cols = None
-            columns_json = None
+        except ValueError as e:
+            raise e
+        except Exception as e:
+            # If pandas parsing fails completely, raise ValueError
+            raise ValueError(f"Failed to parse dataset file: {str(e)}")
 
         # Create dataset record with user ownership
         dataset = Dataset(
@@ -502,16 +513,19 @@ class DatasetService:
     def list_datasets(
         project_id: Optional[str],
         user_id: str,
-        db: Session
+        db: Session,
+        page: int = 1,
+        limit: int = 20
     ):
+        offset = (page - 1) * limit
         if project_id:
             # Verify project belongs to user
             project = db.query(ProjectModel).filter(ProjectModel.id == project_id, ProjectModel.user_id == user_id).first()
             if not project:
                 raise ValueError("Project not found")
-            datasets = db.query(Dataset).join(ProjectDataset).filter(ProjectDataset.project_id == project_id).all()
+            datasets = db.query(Dataset).join(ProjectDataset).filter(ProjectDataset.project_id == project_id).offset(offset).limit(limit).all()
         else:
-            datasets = db.query(Dataset).filter(Dataset.user_id == user_id).all()
+            datasets = db.query(Dataset).filter(Dataset.user_id == user_id).offset(offset).limit(limit).all()
         return datasets
 
     @staticmethod

@@ -1,3 +1,5 @@
+import { toast } from "sonner";
+
 const getApiBaseUrl = (): string => {
   const envUrl = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL;
   if (envUrl) {
@@ -85,7 +87,7 @@ class ApiClient {
     return token ? { Authorization: `Bearer ${token}` } : {};
   }
 
-  async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  async request<T>(endpoint: string, options: RequestInit & { suppressToast?: boolean } = {}): Promise<T> {
     const url = `${this.baseURL}${endpoint}`;
     // Conditionally set Content-Type header only if method is not OPTIONS
     const method = options.method ? options.method.toUpperCase() : 'GET';
@@ -95,10 +97,37 @@ class ApiClient {
       ...options.headers,
     };
 
-    const response = await fetch(url, {
-      ...options,
-      headers,
-    });
+    const maxRetries = method === 'GET' ? 3 : 1;
+    let attempt = 0;
+    let response: Response | null = null;
+    let lastError: any = null;
+
+    while (attempt < maxRetries) {
+      try {
+        response = await fetch(url, {
+          ...options,
+          headers,
+        });
+        break; // Success or server responded with non-2xx status
+      } catch (err) {
+        lastError = err;
+        attempt++;
+        if (attempt >= maxRetries) {
+          break;
+        }
+        // Exponential backoff delay
+        const delay = Math.pow(2, attempt) * 500;
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+
+    if (!response) {
+      const connErrorMsg = `Connection failed: ${lastError?.message || 'Server unreachable'}`;
+      if (!options.suppressToast) {
+        toast.error(connErrorMsg);
+      }
+      throw new ApiError(connErrorMsg, 0, lastError);
+    }
 
     if (!response.ok) {
       let errorMessage = `API Error: ${response.status}`;
@@ -117,6 +146,12 @@ class ApiClient {
         const errorText = await response.text();
         errorMessage += ` - ${errorText}`;
       }
+
+      // Automatically raise error toast for 5xx server errors
+      if (!options.suppressToast && response.status >= 500) {
+        toast.error(errorMessage || "Internal Server Error");
+      }
+
       throw new ApiError(errorMessage, response.status, errorInfo);
     }
 
@@ -816,6 +851,23 @@ class ApiClient {
         target_column: targetColumn
       }),
     });
+  }
+
+  async getLeaderboard(limit?: number): Promise<Array<{
+    id: string;
+    name: string;
+    accuracy: number;
+    task_type: string;
+    created_at?: string;
+  }>> {
+    const query = limit ? `?limit=${limit}` : '';
+    return this.request<Array<{
+      id: string;
+      name: string;
+      accuracy: number;
+      task_type: string;
+      created_at?: string;
+    }>>(`/api/models/leaderboard${query}`);
   }
 }
 
