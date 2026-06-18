@@ -71,6 +71,3 @@ FrontEnd/
 
 # Database
 uam.db
-
-# Alembic
-alembic/versions/*.py
