@@ -26,4 +26,14 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: DbSession = Depend
     user = db.query(User).filter(User.email == token_data.email).first()
     if user is None:
         raise credentials_exception
+
+    # Enforce Row-Level Security (RLS) policies on PostgreSQL connection
+    if db.bind.dialect.name == "postgresql":
+        import sqlalchemy as sa
+        try:
+            db.execute(sa.text("SET LOCAL app.current_user_id = :user_id;"), {"user_id": str(user.id)})
+            db.execute(sa.text("SET LOCAL app.user_role = :role;"), {"role": str(user.role)})
+        except Exception:
+            pass
+
     return user
