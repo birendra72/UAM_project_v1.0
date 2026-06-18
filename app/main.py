@@ -19,14 +19,10 @@ app = FastAPI(
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("uam-backend")
 
-# CORS settings - allow frontend origin (adjust as needed)
-origins = [
-    "http://localhost:5173",
-    "http://localhost:3000",
-    "http://localhost:8080",
-    "http://172.17.240.1:8080",
-    "http://192.168.31.9:8080",
-]
+# CORS settings - parse from environment config
+origins = []
+if settings.ALLOWED_ORIGINS:
+    origins = [origin.strip() for origin in settings.ALLOWED_ORIGINS.split(",") if origin.strip()]
 
 app.add_middleware(
     CORSMiddleware,
