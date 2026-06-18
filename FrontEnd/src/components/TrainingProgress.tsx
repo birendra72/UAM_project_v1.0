@@ -4,7 +4,7 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Loader2, CheckCircle, XCircle, RefreshCw, Clock } from "lucide-react";
-import { apiClient } from "@/lib/api";
+import { apiClient, getWsUrl } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 import useWebSocket from "react-use-websocket";
 
@@ -34,7 +34,7 @@ export default function TrainingProgress({ projectId, onTrainingComplete }: Trai
   const [realTimeStatus, setRealTimeStatus] = useState<TrainingStatus | null>(null);
 
   // WebSocket for real-time updates
-  const { lastMessage } = useWebSocket(`ws://${window.location.hostname}:8000/api/analysis/projects/${projectId}/ml/train-progress`, {
+  const { lastMessage } = useWebSocket(getWsUrl(`/api/analysis/projects/${projectId}/ml/train-progress`), {
     shouldReconnect: () => true,
     reconnectAttempts: 10,
     reconnectInterval: 3000,

@@ -11,7 +11,11 @@ from sklearn.svm import SVC, SVR
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.naive_bayes import GaussianNB
 from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
-from xgboost import XGBClassifier, XGBRegressor
+try:
+    from xgboost import XGBClassifier, XGBRegressor
+    HAS_XGBOOST = True
+except ImportError:
+    HAS_XGBOOST = False
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, r2_score, mean_squared_error, mean_absolute_error
 from sklearn.metrics import confusion_matrix, roc_curve, auc, precision_recall_curve
 import scipy.stats as stats
@@ -160,6 +164,8 @@ class MLService:
                     },
                     version="1.0"
                 )
+                model_meta.metrics_json["target_column"] = target_column
+                model_meta.metrics_json["feature_names"] = feature_names.tolist()
                 db.add(model_meta)
                 model_metas.append(model_meta)
 
@@ -475,12 +481,15 @@ class MLService:
             models = [
                 ('Logistic Regression', LogisticRegression(max_iter=1000, random_state=42)),
                 ('Random Forest', RandomForestClassifier(n_estimators=100, random_state=42)),
-                ('XGBoost', XGBClassifier(n_estimators=100, random_state=42)),
+            ]
+            if HAS_XGBOOST:
+                models.append(('XGBoost', XGBClassifier(n_estimators=100, random_state=42)))
+            models.extend([
                 ('SVM', SVC(random_state=42)),
                 ('Decision Tree', DecisionTreeClassifier(random_state=42)),
                 ('Naive Bayes', GaussianNB()),
                 ('K-Nearest Neighbors', KNeighborsClassifier())
-            ]
+            ])
 
             for name, model in models:
                 try:
@@ -781,6 +790,8 @@ class MLService:
                 },
                 version="1.0"
             )
+            model_meta.metrics_json["target_column"] = target_column
+            model_meta.metrics_json["feature_names"] = feature_names.tolist()
             db.add(model_meta)
             db.commit()
 
@@ -862,15 +873,44 @@ class MLService:
             }
 
     @staticmethod
-    def generate_prediction_summary(predictions: np.ndarray, confidence_scores: np.ndarray = None) -> Dict[str, Any]:
+    def validate_prediction_input(model_meta, data: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
-        Generate detailed summary statistics for predictions
+        Validate incoming prediction data against model's expected features.
+        Returns a dictionary with status, message, missing_features, and extra_features.
+        """
+        feature_names = model_meta.metrics_json.get("feature_names", [])
+        if not feature_names:
+            return {"valid": True, "missing": [], "extra": []}
+
+        # Check if input data is empty
+        if not data:
+            return {"valid": False, "message": "Input data is empty", "missing": feature_names, "extra": []}
+
+        first_record_keys = set(data[0].keys())
+        expected_keys = set(feature_names)
+
+        missing = list(expected_keys - first_record_keys)
+        extra = list(first_record_keys - expected_keys)
+
+        if missing:
+            return {
+                "valid": False,
+                "message": f"Validation failed: Missing features required by model: {', '.join(missing)}",
+                "missing": missing,
+                "extra": extra
+            }
+
+        return {"valid": True, "missing": [], "extra": extra}
+
+    @staticmethod
+    def generate_prediction_summary(predictions: np.ndarray) -> Dict[str, Any]:
+        """
+        Generate summary statistics for predictions
         """
         summary = {
             "total_predictions": len(predictions),
             "prediction_types": {},
-            "statistics": {},
-            "confidence": {}
+            "insights": []
         }
 
         # Handle different prediction types
@@ -879,60 +919,32 @@ class MLService:
                 "min": float(np.min(predictions)),
                 "max": float(np.max(predictions)),
                 "mean": float(np.mean(predictions)),
-                "median": float(np.median(predictions)),
                 "std": float(np.std(predictions)),
-                "q25": float(np.percentile(predictions, 25)),
-                "q75": float(np.percentile(predictions, 75)),
-                "unique_values": len(np.unique(predictions)),
-                "range": float(np.max(predictions) - np.min(predictions))
+                "unique_values": len(np.unique(predictions))
             }
-
-            # Add prediction ranges for regression
-            summary["statistics"]["prediction_ranges"] = {
-                "low": f"< {np.percentile(predictions, 25):.2f}",
-                "medium": f"{np.percentile(predictions, 25):.2f} - {np.percentile(predictions, 75):.2f}",
-                "high": f"> {np.percentile(predictions, 75):.2f}"
-            }
-
+            stats = summary["prediction_types"]["numeric"]
+            summary["insights"].append(f"Predicted outputs range from {stats['min']:.2f} to {stats['max']:.2f}, averaging {stats['mean']:.2f}.")
+            if stats["std"] > (stats["max"] - stats["min"]) * 0.25:
+                summary["insights"].append("Note: High variance detected in predictions. Outputs show a wide range of variation.")
+            else:
+                summary["insights"].append("Note: Low variance detected. Predictions are concentrated around the average.")
         else:  # categorical
             unique_vals, counts = np.unique(predictions, return_counts=True)
-            total = len(predictions)
-            percentages = (counts / total * 100).round(2)
-
             summary["prediction_types"]["categorical"] = {
                 "unique_values": len(unique_vals),
                 "most_common": str(unique_vals[np.argmax(counts)]),
-                "least_common": str(unique_vals[np.argmin(counts)]),
-                "distribution": dict(zip(unique_vals.astype(str).tolist(), counts.tolist())),
-                "percentages": dict(zip(unique_vals.astype(str).tolist(), percentages.tolist())),
-                "entropy": float(stats.entropy(counts / total))  # Diversity measure
+                "distribution": dict(zip(unique_vals.astype(str).tolist(), counts.tolist()))
             }
-
-            # Add class distribution summary
-            summary["statistics"]["class_distribution"] = {
-                "majority_class": str(unique_vals[np.argmax(counts)]),
-                "majority_percentage": float(percentages[np.argmax(counts)]),
-                "minority_class": str(unique_vals[np.argmin(counts)]),
-                "minority_percentage": float(percentages[np.argmin(counts)])
-            }
-
-        # Add confidence information if available
-        if confidence_scores is not None and len(confidence_scores) == len(predictions):
-            summary["confidence"] = {
-                "mean_confidence": float(np.mean(confidence_scores)),
-                "min_confidence": float(np.min(confidence_scores)),
-                "max_confidence": float(np.max(confidence_scores)),
-                "std_confidence": float(np.std(confidence_scores)),
-                "high_confidence_ratio": float(np.mean(confidence_scores > 0.8)),
-                "low_confidence_ratio": float(np.mean(confidence_scores < 0.5))
-            }
-
-        # Add overall statistics
-        summary["statistics"]["data_quality"] = {
-            "has_null_predictions": bool(np.any(pd.isna(predictions))),
-            "prediction_variance": float(np.var(predictions)) if predictions.dtype.kind in ['i', 'f'] else None,
-            "outlier_count": int(np.sum(np.abs(stats.zscore(predictions)) > 3)) if predictions.dtype.kind in ['i', 'f'] else None
-        }
+            stats = summary["prediction_types"]["categorical"]
+            summary["insights"].append(f"Class distribution highlights '{stats['most_common']}' as the dominant predicted category.")
+            # check imbalance
+            dist = stats["distribution"]
+            total = len(predictions)
+            max_pct = (dist[stats["most_common"]] / total) * 100
+            if max_pct > 70:
+                summary["insights"].append(f"Imbalance warning: '{stats['most_common']}' constitutes {max_pct:.1f}% of all outputs.")
+            else:
+                summary["insights"].append("Distribution balance: Predicted categories are relatively well-distributed.")
 
         return summary
 
@@ -962,6 +974,7 @@ class MLService:
 
             explanations = []
             feature_importance = {}
+            fallback_used = False
 
             if method.lower() == "shap":
                 try:
@@ -1001,8 +1014,9 @@ class MLService:
                         mean_shap = np.mean(np.abs(shap_values), axis=0)
                         feature_importance = dict(zip(input_df.columns, mean_shap.tolist()))
 
-                except ImportError:
-                    raise ValueError("SHAP library not available. Please install shap.")
+                except Exception as ex:
+                    print(f"SHAP explainer failed/not installed: {ex}. Falling back to perturbation explainer.")
+                    fallback_used = True
 
             elif method.lower() == "lime":
                 try:
@@ -1033,16 +1047,96 @@ class MLService:
                     # LIME doesn't provide global feature importance easily
                     feature_importance = {}
 
-                except ImportError:
-                    raise ValueError("LIME library not available. Please install lime.")
+                except Exception as ex:
+                    print(f"LIME explainer failed/not installed: {ex}. Falling back to perturbation explainer.")
+                    fallback_used = True
 
             else:
-                raise ValueError(f"Unsupported explanation method: {method}")
+                fallback_used = True
+
+            if fallback_used:
+                # Robust perturbation-based fallback explainer
+                if hasattr(model, 'feature_importances_') and model.feature_importances_ is not None:
+                    feature_importance = dict(zip(input_df.columns, [float(x) for x in model.feature_importances_.tolist()]))
+                elif hasattr(model, 'coef_') and model.coef_ is not None:
+                    coefs = np.abs(model.coef_)
+                    if coefs.ndim > 1:
+                        coefs = np.mean(coefs, axis=0)
+                    coefs_sum = coefs.sum() if coefs.sum() > 0 else 1.0
+                    feature_importance = dict(zip(input_df.columns, [float(x) for x in (coefs / coefs_sum).tolist()]))
+                else:
+                    feature_importance = {col: 1.0 / len(input_df.columns) for col in input_df.columns}
+
+                for i in range(len(input_df)):
+                    row_explanation = {
+                        "sample_index": i,
+                        "feature_contributions": {}
+                    }
+                    sample_row = input_df.iloc[[i]].copy()
+                    
+                    # Get baseline prediction
+                    if hasattr(model, 'predict_proba'):
+                        baseline_pred = model.predict_proba(sample_row)[0]
+                        if isinstance(baseline_pred, np.ndarray) and len(baseline_pred) > 1:
+                            baseline_val = float(baseline_pred[1])
+                        else:
+                            baseline_val = float(baseline_pred[0] if isinstance(baseline_pred, np.ndarray) else baseline_pred)
+                    else:
+                        baseline_val = float(model.predict(sample_row)[0])
+
+                    # Perturb each feature locally
+                    for col in input_df.columns:
+                        std = background_data[col].std() if col in background_data.columns else 0.0
+                        if pd.isna(std) or std == 0:
+                            std = 1.0
+                        
+                        val = sample_row[col].values[0]
+                        contributions = []
+                        if isinstance(val, (int, float, np.integer, np.floating)):
+                            for direction in [-1.0, 1.0]:
+                                perturbed_row = sample_row.copy()
+                                perturbed_row[col] = val + direction * 0.1 * std
+                                if hasattr(model, 'predict_proba'):
+                                    pred_new = model.predict_proba(perturbed_row)[0]
+                                    if isinstance(pred_new, np.ndarray) and len(pred_new) > 1:
+                                        new_val = float(pred_new[1])
+                                    else:
+                                        new_val = float(pred_new[0] if isinstance(pred_new, np.ndarray) else pred_new)
+                                else:
+                                    new_val = float(model.predict(perturbed_row)[0])
+                                contributions.append(new_val - baseline_val)
+                            avg_change = float(np.mean(contributions))
+                        else:
+                            # Categorical swapping
+                            perturbed_row = sample_row.copy()
+                            if col in background_data.columns:
+                                mode_val = background_data[col].mode().values[0]
+                                if mode_val == val and len(background_data[col].unique()) > 1:
+                                    uniq = background_data[col].unique()
+                                    perturbed_row[col] = uniq[1] if uniq[0] == val else uniq[0]
+                                else:
+                                    perturbed_row[col] = mode_val
+                            else:
+                                perturbed_row[col] = val
+
+                            if hasattr(model, 'predict_proba'):
+                                pred_new = model.predict_proba(perturbed_row)[0]
+                                if isinstance(pred_new, np.ndarray) and len(pred_new) > 1:
+                                    new_val = float(pred_new[1])
+                                else:
+                                    new_val = float(pred_new[0] if isinstance(pred_new, np.ndarray) else pred_new)
+                            else:
+                                new_val = float(model.predict(perturbed_row)[0])
+                            avg_change = float(new_val - baseline_val)
+
+                        row_explanation["feature_contributions"][col] = avg_change
+
+                    explanations.append(row_explanation)
 
             return {
                 "explanations": explanations,
                 "feature_importance": feature_importance,
-                "method": method
+                "method": method if not fallback_used else "fallback_perturbation"
             }
 
         except Exception as e:

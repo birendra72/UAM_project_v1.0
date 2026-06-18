@@ -21,7 +21,6 @@ export default function CorrelationHeatmap({ correlations }: CorrelationHeatmapP
       return;
     }
 
-    // Capture the current ref value at the start of the effect
     const currentPlotRef = plotRef.current;
 
     // Extract unique column names
@@ -33,6 +32,7 @@ export default function CorrelationHeatmap({ correlations }: CorrelationHeatmapP
     const matrix: number[][] = [];
     for (let i = 0; i < columns.length; i++) {
       matrix[i] = new Array(columns.length).fill(0);
+      matrix[i][i] = 1.0; // Self-correlation is always 1.0
     }
 
     // Fill matrix with correlation values
@@ -41,9 +41,17 @@ export default function CorrelationHeatmap({ correlations }: CorrelationHeatmapP
       const j = columns.indexOf(corr.col2);
       if (i !== -1 && j !== -1) {
         matrix[i][j] = corr.correlation;
-        matrix[j][i] = corr.correlation; // Symmetric matrix
+        matrix[j][i] = corr.correlation;
       }
     });
+
+    // Custom dark-mode cohesive colorscale
+    // From Cyan (-1.0) -> Slate (0.0) -> Violet (1.0)
+    const customColorscale: Array<[number, string]> = [
+      [0.0, '#06b6d4'],  // Cyan
+      [0.5, '#0f172a'],  // Slate Background
+      [1.0, '#7c3aed']   // Violet
+    ];
 
     // Create heatmap data
     const data = [{
@@ -51,41 +59,45 @@ export default function CorrelationHeatmap({ correlations }: CorrelationHeatmapP
       x: columns,
       y: columns,
       type: 'heatmap' as const,
-      colorscale: 'RdBu' as const,
+      colorscale: customColorscale,
       showscale: true,
       hoverongaps: false,
-      hovertemplate: '%{x} vs %{y}<br>Correlation: %{z:.3f}<extra></extra>'
+      hovertemplate: '%{x} vs %{y}<br>Correlation: %{z:.3f}<extra></extra>',
+      colorbar: {
+        tickfont: { size: 10, color: '#94a3b8', family: 'JetBrains Mono, monospace' },
+        thickness: 16,
+        len: 0.95
+      }
     }];
 
     // Layout configuration
     const layout = {
-      title: {
-        text: 'Correlation Heatmap',
-        font: { size: 16, color: '#374151' }
-      },
       xaxis: {
         tickangle: -45,
-        tickfont: { size: 10 },
-        side: 'bottom' as const
+        tickfont: { size: 10, color: '#94a3b8', family: 'Inter, sans-serif' },
+        side: 'bottom' as const,
+        gridcolor: 'rgba(255,255,255,0.03)',
+        zeroline: false
       },
       yaxis: {
-        tickfont: { size: 10 }
+        tickfont: { size: 10, color: '#94a3b8', family: 'Inter, sans-serif' },
+        gridcolor: 'rgba(255,255,255,0.03)',
+        zeroline: false
       },
       margin: {
-        l: 80,
-        r: 80,
-        t: 60,
-        b: 80
+        l: 90,
+        r: 30,
+        t: 20,
+        b: 90
       },
-      height: 500,
+      height: 420,
       paper_bgcolor: 'rgba(0,0,0,0)',
       plot_bgcolor: 'rgba(0,0,0,0)'
     };
 
     // Plot configuration
     const config = {
-      displayModeBar: true,
-      displaylogo: false,
+      displayModeBar: false,
       responsive: true
     };
 
@@ -103,13 +115,13 @@ export default function CorrelationHeatmap({ correlations }: CorrelationHeatmapP
   if (!correlations.top_correlations || correlations.top_correlations.length === 0) {
     return (
       <div className="text-center py-8 text-muted-foreground">
-        <p>No significant correlations found to display</p>
+        <p className="font-body text-xs">No significant correlations found to display</p>
       </div>
     );
   }
 
   return (
-    <div className="w-full">
+    <div className="w-full overflow-hidden rounded-xl border border-slate-900 bg-slate-950/20 p-4">
       <div ref={plotRef} className="w-full" />
     </div>
   );

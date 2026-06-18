@@ -3,7 +3,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { Plus, Search, FolderKanban, BarChart3, Database, Zap, CheckCircle, TrendingUp, Trash2, Upload, Loader2 } from "lucide-react";
+import { Plus, Search, FolderKanban, BarChart3, Database, Zap, CheckCircle, TrendingUp, Trash2, Upload, Loader2, ArrowRight } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api";
@@ -35,7 +35,9 @@ interface PortfolioStats {
 
 export default function Projects() {
   const [searchTerm, setSearchTerm] = useState("");
-  const [isCreateModalOpen, setCreateModalOpen] = useState(false);
+  const [isCreateModalOpen, setCreateModalOpen] = useState(() => {
+    return new URLSearchParams(window.location.search).get("create") === "true";
+  });
   const queryClient = useQueryClient();
 
   const { data: projects, isLoading: projectsLoading } = useQuery<Project[]>({
@@ -102,114 +104,133 @@ export default function Projects() {
 
   return (
     <AppLayout>
-      <div className="space-y-6 animate-fade-in">
-        <div className="flex items-center justify-between">
+      <div className="space-y-6 animate-fade-in text-slate-100 font-body">
+        
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-900 pb-5">
           <div>
-            <h1 className="text-3xl font-bold">Projects Hub</h1>
-            <p className="text-muted-foreground">Your command center for all analysis projects.</p>
+            <h1 className="text-2xl font-extrabold tracking-tight font-display bg-gradient-to-r from-slate-100 to-slate-300 bg-clip-text text-transparent">
+              Projects Hub
+            </h1>
+            <p className="text-xs text-slate-400 font-body mt-0.5">Create, configure, and monitor automated analysis pipelines</p>
           </div>
-          <Button onClick={() => setCreateModalOpen(true)} className="gap-2">
-            <Plus className="h-4 w-4" />
-            Create New Project
+          <Button 
+            onClick={() => setCreateModalOpen(true)} 
+            className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-semibold text-xs h-9 shadow-glow border border-violet-500/30"
+          >
+            <Plus className="h-4 w-4 mr-1.5" />
+            Create Project
           </Button>
         </div>
 
-        {/* Portfolio Overview */}
-        <Card className="p-6">
-          <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-            <BarChart3 className="h-5 w-5" />
-            Portfolio Overview
-          </h2>
+        {/* Portfolio Stats Row */}
+        <Card className="p-6 bg-slate-950/40 border border-slate-900 backdrop-blur-sm">
+          <div className="flex items-center gap-2 mb-4">
+            <BarChart3 className="h-4 w-4 text-violet-400" />
+            <h3 className="font-display font-bold text-slate-300 text-xs uppercase tracking-wider">Portfolio Overview</h3>
+          </div>
+          
           {statsLoading ? (
-            <div className="grid md:grid-cols-2 lg:grid-cols-5 gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
               {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="h-16 bg-muted rounded-lg animate-pulse" />
+                <div key={i} className="h-16 bg-slate-900/40 border border-slate-900 rounded-xl animate-pulse" />
               ))}
             </div>
           ) : (
-            <div className="grid md:grid-cols-2 lg:grid-cols-5 gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
               <StatCard
                 title="Active Projects"
                 value={stats?.activeProjects || 0}
-                icon={<FolderKanban className="h-5 w-5 text-primary" />}
+                icon={<FolderKanban className="h-4 w-4" />}
+                barColor="bg-violet-500/50"
               />
               <StatCard
                 title="Datasets Used"
                 value={stats?.datasetsUsed || 0}
-                icon={<Database className="h-5 w-5 text-primary" />}
+                icon={<Database className="h-4 w-4" />}
+                barColor="bg-cyan-500/50"
               />
               <StatCard
                 title="Models Training"
                 value={stats?.modelsTraining || 0}
-                icon={<Zap className="h-5 w-5 text-primary" />}
+                icon={<Zap className="h-4 w-4" />}
+                barColor="bg-amber-500/50"
               />
               <StatCard
                 title="Avg. Data Quality"
                 value={stats?.avgDataQuality || 'N/A'}
-                icon={<CheckCircle className="h-5 w-5 text-primary" />}
+                icon={<CheckCircle className="h-4 w-4" />}
+                barColor="bg-emerald-500/50"
               />
               <StatCard
                 title="Top Model Type"
                 value={stats?.topModelType || 'N/A'}
-                icon={<TrendingUp className="h-5 w-5 text-primary" />}
+                icon={<TrendingUp className="h-4 w-4" />}
+                barColor="bg-pink-500/50"
               />
             </div>
           )}
         </Card>
 
+        {/* Filter / Search bar */}
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
           <Input
-            placeholder="Search projects..."
-            className="pl-9"
+            placeholder="Search projects by name..."
+            className="pl-9 bg-slate-950/40 border-slate-900 text-slate-300 placeholder:text-slate-600 text-xs h-9 focus:border-violet-500/50"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
 
-        {/* Upload Area */}
-        <Card className="p-6">
-          <h3 className="text-lg font-semibold mb-4">Upload Dataset</h3>
+        {/* File Dropzone Uploader */}
+        <Card className="p-6 bg-slate-950/40 border border-slate-900 backdrop-blur-sm">
+          <div className="flex items-center gap-2 mb-4">
+            <Upload className="h-4 w-4 text-violet-400" />
+            <h3 className="font-display font-bold text-slate-200 text-xs">Direct Dataset Upload</h3>
+          </div>
+          
           <div
             {...getRootProps()}
-            className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+            className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${
               isDragActive
-                ? 'border-primary bg-primary/5'
-                : 'border-muted-foreground/25 hover:border-primary/50'
+                ? 'border-violet-500 bg-violet-500/5'
+                : 'border-slate-800 hover:border-violet-500/30 bg-slate-950/20'
             }`}
           >
             <input {...getInputProps()} />
-            <Upload className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+            <Upload className="h-8 w-8 mx-auto mb-3 text-slate-500" />
             {isDragActive ? (
-              <p className="text-lg font-medium">Drop the dataset file here...</p>
+              <p className="text-xs font-semibold text-violet-400">Drop the dataset file here...</p>
             ) : (
               <div>
-                <p className="text-lg font-medium mb-2">Drag & drop a dataset file here</p>
-                <p className="text-sm text-muted-foreground mb-4">
-                  or click to browse files (CSV, Excel, JSON, Parquet)
+                <p className="text-xs font-semibold text-slate-300">Drag & drop dataset file here</p>
+                <p className="text-[10px] text-slate-500 mt-1">
+                  Supports CSV, Excel, JSON, Parquet (Will create a project draft automatically)
                 </p>
-                <Button variant="outline" size="sm">
-                  Browse Files
-                </Button>
               </div>
             )}
           </div>
           {uploadMutation.isPending && (
-            <div className="mt-4 text-center">
-              <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
-              <p className="text-sm text-muted-foreground">Uploading dataset...</p>
+            <div className="mt-4 flex items-center justify-center gap-2 bg-slate-900/50 p-2 rounded-lg border border-slate-800">
+              <Loader2 className="h-4 w-4 animate-spin text-violet-400" />
+              <p className="text-xs text-slate-400 font-mono">Uploading catalog...</p>
             </div>
           )}
         </Card>
 
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {/* Projects Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {projectsLoading ? (
-            <p>Loading projects...</p>
+            <div className="col-span-full py-12 text-center">
+              <Loader2 className="h-6 w-6 animate-spin mx-auto text-violet-400" />
+              <p className="text-xs text-slate-500 font-mono mt-2">Loading active projects...</p>
+            </div>
           ) : filteredProjects.length === 0 ? (
-            <Card className="p-12 text-center">
-              <FolderKanban className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-              <h3 className="text-lg font-semibold mb-2">No Projects Yet</h3>
-              <p className="text-muted-foreground">Get started by creating your first project.</p>
+            <Card className="col-span-full p-12 text-center border border-dashed border-slate-900 bg-slate-950/10">
+              <FolderKanban className="h-10 w-10 text-slate-700 mx-auto mb-2 opacity-50" />
+              <h3 className="text-sm font-semibold text-slate-400">No Projects Found</h3>
+              <p className="text-xs text-slate-500">Configure your first AutoML run to catalog.</p>
             </Card>
           ) : (
             filteredProjects.map((project: Project) => (
@@ -222,6 +243,7 @@ export default function Projects() {
           )}
         </div>
 
+        {/* Create Project Modal */}
         <ProjectCreationModal
           isOpen={isCreateModalOpen}
           onClose={() => setCreateModalOpen(false)}
@@ -235,14 +257,17 @@ export default function Projects() {
   );
 }
 
-function StatCard({ title, value, icon }: { title: string; value: number | string; icon: React.ReactNode }) {
+function StatCard({ title, value, icon, barColor }: { title: string; value: number | string; icon: React.ReactNode; barColor: string }) {
   return (
-    <Card className="p-4 hover:shadow-md transition-shadow">
+    <Card className="p-4 bg-slate-950/40 border border-slate-900 hover:border-slate-800 transition-all duration-300 relative overflow-hidden group">
+      <div className={`absolute top-0 left-0 w-1 h-full ${barColor}`} />
       <div className="flex items-center justify-between">
-        <div className="p-2 bg-muted rounded-lg">{icon}</div>
-        <div className="text-right">
-          <p className="text-sm text-muted-foreground">{title}</p>
-          <p className="text-lg font-semibold">{value}</p>
+        <div className="text-left min-w-0">
+          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider truncate">{title}</p>
+          <p className="text-lg font-bold font-display text-slate-200 mt-1 truncate">{value}</p>
+        </div>
+        <div className="h-8 w-8 rounded-lg bg-slate-900 text-violet-400 flex items-center justify-center border border-slate-800 shrink-0">
+          {icon}
         </div>
       </div>
     </Card>
@@ -251,44 +276,45 @@ function StatCard({ title, value, icon }: { title: string; value: number | strin
 
 function ProjectCard({ project, onDelete }: { project: Project; onDelete: () => void }) {
   const statusStyles = {
-    Idle: 'bg-muted text-muted-foreground',
-    Training: 'bg-primary text-primary-foreground',
-    Completed: 'bg-success text-success-foreground',
-    Error: 'bg-destructive text-destructive-foreground',
+    Idle: 'bg-slate-900 text-slate-400 border-slate-800',
+    Training: 'bg-violet-500/10 text-violet-400 border-violet-500/20',
+    Completed: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+    Error: 'bg-rose-500/10 text-rose-400 border-rose-500/20',
   } as const;
 
   const statusStyle = statusStyles[project.status as keyof typeof statusStyles] || statusStyles.Idle;
 
   return (
-    <Card className="p-6 hover:shadow-lg transition-all duration-300 hover:-translate-y-1 h-full flex flex-col group">
+    <Card className="p-5 bg-slate-950/40 border border-slate-900 hover:border-slate-800 backdrop-blur-sm transition-all duration-300 hover:-translate-y-1 h-full flex flex-col group rounded-xl">
       <div className="flex items-start justify-between mb-4">
-        <div className="h-12 w-12 rounded-lg bg-gradient-primary flex items-center justify-center">
-          <FolderKanban className="h-6 w-6 text-primary-foreground" />
+        <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-violet-600/20 to-indigo-600/20 text-violet-400 border border-violet-500/20 flex items-center justify-center">
+          <FolderKanban className="h-5 w-5" />
         </div>
         <div className="flex items-center gap-2">
-          <span className={`text-xs px-2 py-1 rounded-full font-medium ${statusStyle}`}>
-            {project.status}
+          <span className={`text-[10px] font-bold font-mono px-2 py-0.5 rounded border ${statusStyle}`}>
+            {(project.status || 'IDLE').toUpperCase()}
           </span>
+          
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                className="h-7 w-7 text-slate-500 hover:text-rose-400 hover:bg-rose-950/20 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg"
               >
-                <Trash2 className="h-4 w-4 text-destructive" />
+                <Trash2 className="h-4 w-4" />
               </Button>
             </AlertDialogTrigger>
-            <AlertDialogContent>
+            <AlertDialogContent className="bg-slate-950 border border-slate-900 text-slate-200">
               <AlertDialogHeader>
-                <AlertDialogTitle>Delete Project</AlertDialogTitle>
-                <AlertDialogDescription>
-                  Are you sure you want to permanently delete "{project.name}"? The project will be removed but datasets, models, and reports will be preserved. This action cannot be undone.
+                <AlertDialogTitle className="font-display font-bold">Delete Project Draft?</AlertDialogTitle>
+                <AlertDialogDescription className="text-xs text-slate-400 leading-relaxed font-body">
+                  This action will delete "{project.name}". The related dataset, models, and export indexes will remain preserved in raw database files, but the project folder will be unmapped.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={onDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                <AlertDialogCancel className="border-slate-800 bg-slate-900 text-slate-300 hover:bg-slate-800">Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={onDelete} className="bg-rose-600 hover:bg-rose-500 text-white font-semibold">
                   Delete Project
                 </AlertDialogAction>
               </AlertDialogFooter>
@@ -297,45 +323,49 @@ function ProjectCard({ project, onDelete }: { project: Project; onDelete: () => 
         </div>
       </div>
 
-      <Link to={`/app/projects/${project.id}/overview`} className="flex-1">
-        <div className="cursor-pointer">
-          <h3 className="text-xl font-semibold mb-2">{project.name}</h3>
-          <p className="text-sm text-muted-foreground mb-3 flex-grow">{project.description}</p>
+      <Link to={`/app/projects/${project.id}/overview`} className="flex-1 flex flex-col justify-between">
+        <div>
+          <h3 className="font-bold text-sm text-slate-200 group-hover:text-violet-400 transition-colors flex items-center gap-1.5">
+            {project.name}
+            <ArrowRight className="h-3.5 w-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-violet-400" />
+          </h3>
+          <p className="text-xs text-slate-500 mt-1 line-clamp-2 leading-relaxed">{project.description || 'No description provided.'}</p>
 
           {project.datasetName && (
-            <div className="text-xs text-muted-foreground mb-3">
-              Dataset: <span className="font-medium">{project.datasetName}</span>
+            <div className="text-[10px] text-slate-400 font-mono mt-3 flex items-center gap-1.5">
+              <span className="text-slate-600 uppercase">Dataset:</span>
+              <span className="truncate max-w-[150px]">{project.datasetName}</span>
             </div>
           )}
 
           {project.progress && project.progress > 0 && (
-            <div className="mb-3">
-              <div className="flex justify-between text-xs mb-1">
-                <span className="text-muted-foreground">Progress</span>
-                <span className="font-medium">{project.progress}%</span>
+            <div className="mt-3">
+              <div className="flex justify-between text-[10px] mb-1 font-mono">
+                <span className="text-slate-500">RUNNING TASK</span>
+                <span className="font-bold text-violet-400">{project.progress}%</span>
               </div>
-              <div className="w-full bg-muted rounded-full h-2">
+              <div className="w-full bg-slate-900 rounded-full h-1 border border-slate-950">
                 <div
-                  className={`h-2 rounded-full transition-all duration-300 ${
-                    project.status === 'Error' ? 'bg-destructive' : 'bg-primary'
+                  className={`h-1 rounded-full transition-all duration-300 ${
+                    project.status === 'Error' ? 'bg-rose-500' : 'bg-violet-600'
                   }`}
-                  style={{ width: `${project.progress}%` }} // Dynamic width for progress bar - inline style required
+                  style={{ width: `${project.progress}%` }}
                 />
               </div>
             </div>
           )}
+        </div>
 
-          <div className="border-t border-border pt-3 flex justify-between items-end text-xs">
-            {project.keyMetric ? (
-              <div>
-                <span className="text-muted-foreground block">{project.keyMetric.name}:</span>
-                <span className="font-semibold text-foreground">{project.keyMetric.value}</span>
-              </div>
-            ) : (
-              <span className="text-muted-foreground">No metrics yet</span>
-            )}
-            <span className="text-muted-foreground">{project.lastUpdated || 'Never'}</span>
-          </div>
+        <div className="border-t border-slate-900/80 pt-3 mt-4 flex justify-between items-center text-[10px] font-mono text-slate-500">
+          {project.keyMetric ? (
+            <div>
+              <span className="text-slate-600 block uppercase tracking-wider">{project.keyMetric.name}:</span>
+              <span className="font-bold text-slate-300">{project.keyMetric.value}</span>
+            </div>
+          ) : (
+            <span className="text-slate-600 uppercase">No active run metrics</span>
+          )}
+          <span>{project.lastUpdated || 'Never'}</span>
         </div>
       </Link>
     </Card>
@@ -378,38 +408,47 @@ function ProjectCreationModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <Card className="w-full max-w-md">
-        <div className="p-6">
-          <h2 className="text-2xl font-bold mb-4">Create New Project</h2>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">Project Name</label>
-              <Input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Enter project name"
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Description</label>
-              <Input
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Brief description (optional)"
-              />
-            </div>
-            <div className="flex justify-end space-x-2 pt-4">
-              <Button type="button" variant="outline" onClick={onClose}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={isSubmitting || !name.trim()}>
-                {isSubmitting ? 'Creating...' : 'Create Project'}
-              </Button>
-            </div>
-          </form>
-        </div>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+      <Card className="w-full max-w-md bg-slate-950 border border-slate-900 p-6 rounded-xl shadow-2xl">
+        <h2 className="text-lg font-bold font-display text-slate-200 mb-4">Create AutoML Project</h2>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1">
+            <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Project Title</label>
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. churn-predictor-v1"
+              className="bg-slate-900 border-slate-800 text-slate-300 text-xs h-9 focus:border-violet-500/50"
+              required
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Description</label>
+            <Input
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Target metrics and models context details"
+              className="bg-slate-900 border-slate-800 text-slate-300 text-xs h-9 focus:border-violet-500/50"
+            />
+          </div>
+          <div className="flex justify-end space-x-2 pt-4 border-t border-slate-900/60">
+            <Button 
+              type="button" 
+              variant="outline" 
+              onClick={onClose}
+              className="h-8 text-xs border-slate-800 bg-slate-950 text-slate-300 hover:text-slate-100 hover:bg-slate-900"
+            >
+              Cancel
+            </Button>
+            <Button 
+              type="submit" 
+              disabled={isSubmitting || !name.trim()}
+              className="h-8 text-xs bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-semibold shadow-glow border border-violet-500/30"
+            >
+              {isSubmitting ? 'Initializing...' : 'Create Project'}
+            </Button>
+          </div>
+        </form>
       </Card>
     </div>
   );

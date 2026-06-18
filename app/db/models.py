@@ -23,7 +23,6 @@ class User(Base):
     datasets: Mapped[list["Dataset"]] = relationship("Dataset", back_populates="user")
     templates: Mapped[list["Template"]] = relationship("Template", back_populates="creator")
     prediction_results: Mapped[list["PredictionResult"]] = relationship("PredictionResult", back_populates="user")
-    artifacts: Mapped[list["Artifact"]] = relationship("Artifact", back_populates="user")
 
 from sqlalchemy import ForeignKey
 
@@ -37,9 +36,9 @@ class Project(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
-    user = relationship("User", back_populates="projects")
-    runs = relationship("Run", back_populates="project")
-    project_datasets = relationship("ProjectDataset", back_populates="project")
+    user: Mapped["User"] = relationship("User", back_populates="projects")
+    runs: Mapped[list["Run"]] = relationship("Run", back_populates="project")
+    project_datasets: Mapped[list["ProjectDataset"]] = relationship("ProjectDataset", back_populates="project")
 
 class Dataset(Base):
     __tablename__ = "datasets"
@@ -56,10 +55,10 @@ class Dataset(Base):
     last_validated: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Relationships
-    user = relationship("User", back_populates="datasets")
-    dataset_versions = relationship("DatasetVersion", back_populates="dataset")
-    runs = relationship("Run", back_populates="dataset")
-    project_datasets = relationship("ProjectDataset", back_populates="dataset")
+    user: Mapped["User"] = relationship("User", back_populates="datasets")
+    dataset_versions: Mapped[list["DatasetVersion"]] = relationship("DatasetVersion", back_populates="dataset")
+    runs: Mapped[list["Run"]] = relationship("Run", back_populates="dataset")
+    project_datasets: Mapped[list["ProjectDataset"]] = relationship("ProjectDataset", back_populates="dataset")
 
 class DatasetVersion(Base):
     __tablename__ = "dataset_versions"
@@ -77,7 +76,7 @@ class DatasetVersion(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
-    dataset = relationship("Dataset", back_populates="dataset_versions")
+    dataset: Mapped["Dataset"] = relationship("Dataset", back_populates="dataset_versions")
 
 class ProjectDataset(Base):
     __tablename__ = "project_datasets"
@@ -103,18 +102,17 @@ class Run(Base):
     progress: Mapped[float] = mapped_column(Float, default=0.0)
 
     # Relationships
-    project = relationship("Project", back_populates="runs")
-    dataset = relationship("Dataset", back_populates="runs")
-    artifacts = relationship("Artifact", back_populates="run")
-    model_metas = relationship("ModelMeta", back_populates="run")
-    logs = relationship("Log", back_populates="run")
+    project: Mapped["Project"] = relationship("Project", back_populates="runs")
+    dataset: Mapped["Dataset"] = relationship("Dataset", back_populates="runs")
+    artifacts: Mapped[list["Artifact"]] = relationship("Artifact", back_populates="run")
+    model_metas: Mapped[list["ModelMeta"]] = relationship("ModelMeta", back_populates="run")
+    logs: Mapped[list["Log"]] = relationship("Log", back_populates="run")
 
 class Artifact(Base):
     __tablename__ = "artifacts"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     run_id: Mapped[str] = mapped_column(String, ForeignKey("runs.id"), nullable=False)
-    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), nullable=False)
     type: Mapped[str] = mapped_column(String, nullable=False)  # chart, pdf, model, prediction
     storage_key: Mapped[str] = mapped_column(String, nullable=False)
     filename: Mapped[str] = mapped_column(String, nullable=False)
@@ -122,8 +120,7 @@ class Artifact(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
-    run = relationship("Run", back_populates="artifacts")
-    user = relationship("User", back_populates="artifacts")
+    run: Mapped["Run"] = relationship("Run", back_populates="artifacts")
 
 class ModelMeta(Base):
     __tablename__ = "model_metas"
@@ -137,8 +134,8 @@ class ModelMeta(Base):
     version: Mapped[str | None] = mapped_column(String)
 
     # Relationships
-    run = relationship("Run", back_populates="model_metas")
-    prediction_results = relationship("PredictionResult", back_populates="model")
+    run: Mapped["Run"] = relationship("Run", back_populates="model_metas")
+    prediction_results: Mapped[list["PredictionResult"]] = relationship("PredictionResult", back_populates="model")
 
 class Log(Base):
     __tablename__ = "logs"
@@ -150,7 +147,7 @@ class Log(Base):
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
-    run = relationship("Run", back_populates="logs")
+    run: Mapped["Run"] = relationship("Run", back_populates="logs")
 
 class Template(Base):
     __tablename__ = "templates"
@@ -160,12 +157,12 @@ class Template(Base):
     description: Mapped[str | None] = mapped_column(Text)
     type: Mapped[str] = mapped_column(String, nullable=False)  # e.g., 'analysis', 'model'
     config_json: Mapped[dict | None] = mapped_column(JSON)
-    is_public: Mapped[bool] = mapped_column(Integer, default=1)  # 1 for public, 0 for admin only
+    is_public: Mapped[int] = mapped_column(Integer, default=1)  # 1 for public, 0 for admin only
     created_by: Mapped[str | None] = mapped_column(String, ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
-    creator = relationship("User", back_populates="templates")
+    creator: Mapped["User"] = relationship("User", back_populates="templates")
 
 class PredictionResult(Base):
     __tablename__ = "prediction_results"
@@ -182,5 +179,55 @@ class PredictionResult(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
-    model = relationship("ModelMeta", back_populates="prediction_results")
-    user = relationship("User", back_populates="prediction_results")
+    model: Mapped["ModelMeta"] = relationship("ModelMeta", back_populates="prediction_results")
+    user: Mapped["User"] = relationship("User", back_populates="prediction_results")
+
+class DataLineage(Base):
+    __tablename__ = "data_lineages"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    dataset_id: Mapped[str] = mapped_column(String, ForeignKey("datasets.id"), nullable=False)
+    operation_type: Mapped[str] = mapped_column(String, nullable=False)  # 'upload', 'clean', 'transform', 'train'
+    input_storage_key: Mapped[str | None] = mapped_column(String)
+    output_storage_key: Mapped[str | None] = mapped_column(String)
+    parameters_json: Mapped[dict | None] = mapped_column(JSON)
+    executed_by: Mapped[str | None] = mapped_column(String, ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    dataset: Mapped["Dataset"] = relationship("Dataset")
+
+class EDAReport(Base):
+    __tablename__ = "eda_reports"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(String, ForeignKey("projects.id"), nullable=False)
+    dataset_id: Mapped[str] = mapped_column(String, ForeignKey("datasets.id"), nullable=False)
+    summary_metrics: Mapped[dict] = mapped_column(JSON, nullable=False)
+    data_quality_score: Mapped[float] = mapped_column(Float, nullable=False)
+    outliers_json: Mapped[dict | None] = mapped_column(JSON)
+    correlations_json: Mapped[dict | None] = mapped_column(JSON)
+    storage_key: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    project: Mapped["Project"] = relationship("Project")
+    dataset: Mapped["Dataset"] = relationship("Dataset")
+
+from sqlalchemy import Boolean
+
+class ModelDriftMetric(Base):
+    __tablename__ = "model_drift_metrics"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    model_id: Mapped[str] = mapped_column(String, ForeignKey("model_metas.id"), nullable=False)
+    metric_name: Mapped[str] = mapped_column(String, nullable=False)  # 'psi', 'ks_statistic', etc.
+    value: Mapped[float] = mapped_column(Float, nullable=False)
+    reference_value: Mapped[float | None] = mapped_column(Float)
+    threshold: Mapped[float] = mapped_column(Float, nullable=False)
+    is_drifted: Mapped[bool] = mapped_column(Boolean, default=False)
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    model: Mapped["ModelMeta"] = relationship("ModelMeta")
+

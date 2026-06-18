@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from app.db.session import get_db
-from app.db.models import ModelMeta, Run, Project, Artifact, Dataset, ProjectDataset, PredictionResult
+from app.db.models import ModelMeta, Run, Project, Artifact, Dataset, ProjectDataset
 from app.schemas.models import (
     ModelMeta as ModelMetaSchema,
     PredictRequest,
@@ -23,6 +23,8 @@ import pandas as pd
 import uuid
 import json
 from app.workers.tasks import predict_batch_task
+from celery.result import AsyncResult
+from app.workers.celery_app import celery_app
 
 router = APIRouter()
 
@@ -110,29 +112,31 @@ def predict(model_id: str, request: PredictRequest, db: Session = Depends(get_db
     if not model_meta:
         raise HTTPException(status_code=404, detail="Model not found")
 
+    # Validate input data
+    validation = MLService.validate_prediction_input(model_meta, request.data)
+    if not validation["valid"]:
+        raise HTTPException(status_code=422, detail=validation)
+
     # Load model from storage
     model_bytes = storage.get_object(model_meta.storage_key)
-    model = joblib.load(model_bytes)  # type: ignore
+    if hasattr(model_bytes, "read"):
+        model = joblib.load(model_bytes)
+    else:
+        model = joblib.load(io.BytesIO(model_bytes))  # type: ignore
 
     # Prepare input data
     input_df = pd.DataFrame(request.data)
+    
+    # Ensure correct column ordering
+    feature_names = model_meta.metrics_json.get("feature_names", [])
+    if feature_names:
+        input_df = input_df[feature_names]
 
     # Predict
     predictions = model.predict(input_df)  # type: ignore
 
     # Generate summary
     summary = MLService.generate_prediction_summary(predictions)
-
-    # Save prediction result to database
-    prediction_result = PredictionResult(
-        model_id=model_id,
-        user_id=current_user.id,
-        input_data=request.data,
-        predictions=predictions.tolist(),
-        summary=summary
-    )
-    db.add(prediction_result)
-    db.commit()
 
     return PredictResponse(predictions=predictions.tolist(), summary=summary)
 
@@ -164,38 +168,33 @@ def predict_from_file(
         if not isinstance(data, list):
             data = [data]
 
+    # Validate input data
+    validation = MLService.validate_prediction_input(model_meta, data)
+    if not validation["valid"]:
+        raise HTTPException(status_code=422, detail=validation)
+
     # Load model and predict
     model_bytes = storage.get_object(model_meta.storage_key)
-    model = joblib.load(model_bytes)  # type: ignore
+    if hasattr(model_bytes, "read"):
+        model = joblib.load(model_bytes)
+    else:
+        model = joblib.load(io.BytesIO(model_bytes))  # type: ignore
 
     input_df = pd.DataFrame(data)
-    # Filter to only numeric columns, as the model was trained on numeric features only
-    numeric_cols = input_df.select_dtypes(include=['number']).columns
-    if len(numeric_cols) == 0:
-        raise HTTPException(status_code=400, detail="No numeric columns found in uploaded data. Model requires numeric features.")
-    input_df_numeric = input_df[numeric_cols]
-    predictions = model.predict(input_df_numeric)  # type: ignore
+    feature_names = model_meta.metrics_json.get("feature_names", [])
+    if feature_names:
+        input_df = input_df[feature_names]
+
+    predictions = model.predict(input_df)  # type: ignore
 
     # Generate summary
     summary = MLService.generate_prediction_summary(predictions)
-
-    # Save prediction result to database
-    prediction_result = PredictionResult(
-        model_id=model_id,
-        user_id=current_user.id,
-        input_data=data,
-        predictions=predictions.tolist(),
-        summary=summary
-    )
-    db.add(prediction_result)
-    db.commit()
 
     return PredictResponse(predictions=predictions.tolist(), summary=summary)
 
 @router.post("/{model_id}/predict-batch", response_model=BatchPredictResponse)
 def predict_batch(
     model_id: str,
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     batch_size: int = 1000,
     db: Session = Depends(get_db),
@@ -209,20 +208,45 @@ def predict_batch(
     if not file.filename or not file.filename.lower().endswith(('.csv', '.json')):
         raise HTTPException(status_code=400, detail="Only CSV and JSON files are supported")
 
+    content = file.file.read()
+
+    # Fast validation of file sample to prevent starting a failing background task
+    try:
+        if file.filename.lower().endswith('.csv'):
+            df_sample = pd.read_csv(io.BytesIO(content), nrows=5)
+            sample_data = df_sample.to_dict('records')
+        else:
+            import json
+            sample_data = json.loads(content)
+            if isinstance(sample_data, list) and sample_data:
+                sample_data = sample_data[:5]
+            else:
+                sample_data = [sample_data]
+        
+        validation = MLService.validate_prediction_input(model_meta, sample_data)
+        if not validation["valid"]:
+            raise HTTPException(status_code=422, detail=validation)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to validate file schema: {str(e)}")
+
     # Upload file to storage
     file_key = f"predictions/input/{uuid.uuid4()}_{file.filename}"
-    storage.put_object(file_key, file.file.read())
+    storage.put_object(file_key, content)
 
     # Create task ID
     task_id = str(uuid.uuid4())
 
-    # Start background task
-    background_tasks.add_task(
-        predict_batch_task,
-        task_id=task_id,
-        model_key=model_meta.storage_key,
-        input_file_key=file_key,
-        batch_size=batch_size
+    # Start background task enqueued via Celery
+    predict_batch_task.apply_async(
+        kwargs={
+            "task_id": task_id,
+            "model_key": model_meta.storage_key,
+            "input_file_key": file_key,
+            "batch_size": batch_size
+        },
+        task_id=task_id
     )
 
     return BatchPredictResponse(
@@ -245,15 +269,83 @@ def get_batch_predict_status(
     if not model_meta:
         raise HTTPException(status_code=404, detail="Model not found")
 
-    # For now, return mock status (in production, you'd check Redis/Celery status)
-    # This is a simplified implementation
+    res = AsyncResult(task_id, app=celery_app)
+    state = res.state
+    progress = 0.0
+    results_key = None
+    error = None
+
+    if state == "PROGRESS":
+        progress = res.info.get("progress", 0.0) if res.info else 0.0
+    elif state == "SUCCESS":
+        progress = 1.0
+        info = res.info or {}
+        results_key = info.get("results_key")
+    elif state == "FAILURE":
+        progress = 0.0
+        error = str(res.info) if res.info else "Unknown error"
+
     return BatchPredictStatus(
         task_id=task_id,
-        status="COMPLETED",
-        progress=1.0,
-        total_rows=1000,
-        processed_rows=1000,
-        results_key=f"predictions/results/{task_id}.json"
+        status=state,
+        progress=progress,
+        total_rows=None,
+        processed_rows=None,
+        results_key=results_key,
+        error=error
+    )
+
+@router.get("/{model_id}/explain", response_model=ExplainResponse)
+def get_model_explanation(
+    model_id: str,
+    method: Optional[str] = "shap",
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    model_meta = db.query(ModelMeta).join(Run).join(Project).filter(
+        ModelMeta.id == model_id, Project.user_id == current_user.id
+    ).first()
+    if not model_meta:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    # Get project and dataset info for context
+    run = db.query(Run).filter(Run.id == model_meta.run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    # Get datasets for the project
+    datasets = db.query(Dataset).join(ProjectDataset).join(Project).filter(
+        Project.id == run.project_id, Project.user_id == current_user.id
+    ).all()
+
+    if not datasets:
+        raise HTTPException(status_code=404, detail="No datasets found for project")
+
+    # Load first 5 rows of the principal dataset as sample data
+    try:
+        file_obj = storage.download_stream(datasets[0].storage_key)
+        df = pd.read_csv(file_obj)
+        if 'target' in df.columns:
+            df = df.drop(columns=['target'])
+        # Drop internal columns if they exist
+        internal_cols = [c for c in ['_dataset_id', '_dataset_name'] if c in df.columns]
+        if internal_cols:
+            df = df.drop(columns=internal_cols)
+        sample_data = df.head(5).to_dict('records')
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read dataset sample: {str(e)}")
+
+    # Use MLService for explanations
+    explanations = MLService.explain_predictions(
+        model_meta=model_meta,
+        datasets=datasets,
+        input_data=sample_data,
+        method=method or "shap"
+    )
+
+    return ExplainResponse(
+        explanations=explanations["explanations"],
+        feature_importance=explanations.get("feature_importance")
     )
 
 @router.post("/{model_id}/explain", response_model=ExplainResponse)
@@ -273,7 +365,7 @@ def explain_prediction(
         raise HTTPException(status_code=404, detail="Run not found")
 
     # Get datasets for the project
-    datasets = db.query(Dataset).join(Project).filter(
+    datasets = db.query(Dataset).join(ProjectDataset).join(Project).filter(
         Project.id == run.project_id, Project.user_id == current_user.id
     ).all()
 

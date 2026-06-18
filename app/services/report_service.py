@@ -26,7 +26,9 @@ class ReportService:
         db: Session,
         include_eda: bool = True,
         include_models: bool = True,
-        format_type: str = "pdf"
+        format_type: str = "pdf",
+        company_name: Optional[str] = None,
+        primary_color: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Generate a comprehensive report for a project including EDA and model results
@@ -52,6 +54,20 @@ class ReportService:
         runs = db.query(Run).filter(Run.project_id == project_id).all()
         models = db.query(ModelMeta).join(Run).filter(Run.project_id == project_id).all()
 
+        if not runs:
+            # Create a placeholder run for report metadata link
+            placeholder_run = Run(
+                project_id=project_id,
+                dataset_id=datasets[0].id,
+                status="COMPLETED",
+                current_task="System Report Initialization",
+                parameters_json={}
+            )
+            db.add(placeholder_run)
+            db.commit()
+            db.refresh(placeholder_run)
+            runs = [placeholder_run]
+
         # Generate report data
         report_data = {
             "project_info": {
@@ -76,42 +92,18 @@ class ReportService:
         # Include model results if requested
         if include_models and models:
             report_data["model_results"] = ReportService._summarize_models(models, runs)
-        else:
-            # Provide empty model results structure even when no models
-            report_data["model_results"] = {
-                "total_models": 0,
-                "best_model": None,
-                "model_types": {},
-                "performance_metrics": []
-            }
 
         # Generate the report file
         if format_type.lower() == "pdf":
-            report_key = ReportService._generate_pdf_report(project, report_data)
+            report_key = ReportService._generate_pdf_report(project, report_data, company_name, primary_color)
         elif format_type.lower() == "html":
-            report_key = ReportService._generate_html_report(project, report_data)
+            report_key = ReportService._generate_html_report(project, report_data, company_name, primary_color)
         else:
             raise ValueError(f"Unsupported format: {format_type}")
 
-        # Store report artifact - create a dummy run if no runs exist
-        if not runs:
-            # Create a dummy run for the report artifact
-            dummy_run = Run(
-                project_id=project_id,
-                dataset_id=datasets[0].id,  # Use first dataset
-                status="COMPLETED",
-                started_at=datetime.now(),
-                finished_at=datetime.now()
-            )
-            db.add(dummy_run)
-            db.flush()  # Flush to assign id without committing transaction
-            run_id = dummy_run.id
-        else:
-            run_id = runs[0].id
-
+        # Store report artifact
         artifact = Artifact(
-            run_id=run_id,
-            user_id=user_id,
+            run_id=runs[0].id if runs else None,
             type="report",
             storage_key=report_key,
             filename=f"project_report_{project_id}.{format_type}",
@@ -120,7 +112,8 @@ class ReportService:
                 "includes_eda": include_eda,
                 "includes_models": include_models,
                 "generated_at": str(datetime.now()),
-                "type": "main"
+                "company_name": company_name,
+                "primary_color": primary_color
             }
         )
         db.add(artifact)
@@ -169,8 +162,6 @@ class ReportService:
             eda_key = f"eda/{dataset.id}_eda.json"
             try:
                 eda_data = storage.get_object(eda_key)
-                eda_json = None
-
                 if hasattr(eda_data, 'read'):
                     # File-like object
                     eda_content = eda_data.read()
@@ -202,32 +193,23 @@ class ReportService:
                         else:
                             raise
 
-                if eda_json:
-                    eda_summary["available_analyses"].append({
-                        "dataset_id": dataset.id,
-                        "dataset_name": dataset.filename,
-                        "analysis_type": "comprehensive_eda",
-                        "key_findings": eda_json.get("key_findings", [])
-                    })
-
-                    # Extract key insights
-                    if "summary_stats" in eda_json:
-                        numeric_cols = eda_json["summary_stats"].get("numeric_columns", [])
-                        categorical_cols = eda_json["summary_stats"].get("categorical_columns", [])
-
-                        insight = f"Dataset {dataset.filename}: {len(numeric_cols)} numeric, {len(categorical_cols)} categorical columns"
-                        eda_summary["key_insights"].append(insight)
-
-            except Exception as e:
-                # If EDA data doesn't exist, add basic dataset info
                 eda_summary["available_analyses"].append({
                     "dataset_id": dataset.id,
                     "dataset_name": dataset.filename,
-                    "analysis_type": "basic_info",
-                    "key_findings": [f"Dataset contains {dataset.rows or 'unknown'} rows and {dataset.cols or 'unknown'} columns"]
+                    "analysis_type": "comprehensive_eda",
+                    "key_findings": eda_json.get("key_findings", [])
                 })
-                insight = f"Dataset {dataset.filename}: Basic info available ({dataset.rows or 'unknown'} rows, {dataset.cols or 'unknown'} columns)"
-                eda_summary["key_insights"].append(insight)
+
+                # Extract key insights
+                if "summary_stats" in eda_json:
+                    numeric_cols = eda_json["summary_stats"].get("numeric_columns", [])
+                    categorical_cols = eda_json["summary_stats"].get("categorical_columns", [])
+
+                    insight = f"Dataset {dataset.filename}: {len(numeric_cols)} numeric, {len(categorical_cols)} categorical columns"
+                    eda_summary["key_insights"].append(insight)
+
+            except Exception as e:
+                print(f"Could not load EDA for dataset {dataset.id}: {e}")
 
         return eda_summary
 
@@ -276,26 +258,70 @@ class ReportService:
         return model_summary
 
     @staticmethod
-    def _generate_pdf_report(project: Project, report_data: Dict[str, Any]) -> str:
+    def _generate_pdf_report(
+        project: Project,
+        report_data: Dict[str, Any],
+        company_name: Optional[str] = None,
+        primary_color: Optional[str] = None
+    ) -> str:
         """Generate PDF report"""
         buffer = io.BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=A4)
         styles = getSampleStyleSheet()
         story = []
 
-        # Title
+        # Parse primary theme color
+        theme_color = colors.HexColor('#1e3a8a')  # default navy blue
+        if primary_color:
+            try:
+                color_str = primary_color if primary_color.startswith('#') else f"#{primary_color}"
+                theme_color = colors.HexColor(color_str)
+            except Exception:
+                theme_color = colors.HexColor('#1e3a8a')
+
+        # Define styles using the theme color
         title_style = ParagraphStyle(
             'CustomTitle',
             parent=styles['Heading1'],
             fontSize=24,
-            spaceAfter=30,
+            textColor=theme_color,
+            spaceAfter=15,
             alignment=1  # Center
         )
+
+        h2_style = ParagraphStyle(
+            'CustomHeading2',
+            parent=styles['Heading2'],
+            textColor=theme_color,
+            spaceBefore=15,
+            spaceAfter=8
+        )
+
+        h3_style = ParagraphStyle(
+            'CustomHeading3',
+            parent=styles['Heading3'],
+            textColor=theme_color,
+            spaceBefore=10,
+            spaceAfter=6
+        )
+
         story.append(Paragraph(f"Project Report: {project.name}", title_style))
+
+        if company_name:
+            company_style = ParagraphStyle(
+                'CompanyBranding',
+                parent=styles['Normal'],
+                fontSize=12,
+                textColor=theme_color,
+                spaceAfter=15,
+                alignment=1  # Center
+            )
+            story.append(Paragraph(f"PREPARED BY / FOR: {company_name.upper()}", company_style))
+
         story.append(Spacer(1, 12))
 
         # Project Info
-        story.append(Paragraph("Project Information", styles['Heading2']))
+        story.append(Paragraph("Project Information", h2_style))
         project_info = report_data["project_info"]
         info_text = f"""
         <b>Project ID:</b> {project_info['id']}<br/>
@@ -309,7 +335,7 @@ class ReportService:
         story.append(Spacer(1, 12))
 
         # Datasets Summary
-        story.append(Paragraph("Datasets Summary", styles['Heading2']))
+        story.append(Paragraph("Datasets Summary", h2_style))
         datasets = report_data["datasets_summary"]
         dataset_data = [["Filename", "Rows", "Columns", "Size"]]
         for ds in datasets["datasets"]:
@@ -322,35 +348,35 @@ class ReportService:
 
         table = Table(dataset_data)
         table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('BACKGROUND', (0, 0), (-1, 0), theme_color),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, 0), 14),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#f8fafc')),
+            ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#e2e8f0'))
         ]))
         story.append(table)
         story.append(Spacer(1, 12))
 
         # EDA Results
-        if report_data["eda_results"]["available_analyses"]:
-            story.append(Paragraph("Exploratory Data Analysis", styles['Heading2']))
+        if report_data.get("eda_results") and "available_analyses" in report_data["eda_results"]:
+            story.append(Paragraph("Exploratory Data Analysis", h2_style))
             for analysis in report_data["eda_results"]["available_analyses"]:
-                story.append(Paragraph(f"Dataset: {analysis['dataset_name']}", styles['Heading3']))
+                story.append(Paragraph(f"Dataset: {analysis['dataset_name']}", h3_style))
                 for finding in analysis.get("key_findings", []):
                     story.append(Paragraph(f"• {finding}", styles['Normal']))
                 story.append(Spacer(1, 6))
 
         # Model Results
-        if report_data["model_results"]["performance_metrics"]:
-            story.append(Paragraph("Model Performance", styles['Heading2']))
+        if report_data.get("model_results") and "performance_metrics" in report_data["model_results"]:
+            story.append(Paragraph("Model Performance", h2_style))
 
             # Best Model
             best_model = report_data["model_results"]["best_model"]
             if best_model:
-                story.append(Paragraph("Best Performing Model", styles['Heading3']))
+                story.append(Paragraph("Best Performing Model", h3_style))
                 best_text = f"""
                 <b>Model:</b> {best_model['name']}<br/>
                 <b>Score:</b> {best_model['metrics'].get('score', 'N/A')}<br/>
@@ -360,7 +386,7 @@ class ReportService:
                 story.append(Spacer(1, 12))
 
             # Model Comparison Table
-            story.append(Paragraph("Model Comparison", styles['Heading3']))
+            story.append(Paragraph("Model Comparison", h3_style))
             model_data = [["Model Name", "Primary Score", "Status", "Created"]]
             for model in report_data["model_results"]["performance_metrics"]:
                 model_data.append([
@@ -372,14 +398,14 @@ class ReportService:
 
             model_table = Table(model_data)
             model_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('BACKGROUND', (0, 0), (-1, 0), theme_color),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
                 ('FONTSIZE', (0, 0), (-1, 0), 12),
                 ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-                ('GRID', (0, 0), (-1, -1), 1, colors.black)
+                ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#f8fafc')),
+                ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#e2e8f0'))
             ]))
             story.append(model_table)
 
@@ -398,65 +424,97 @@ class ReportService:
 
         return report_key
 
-
     @staticmethod
-    def _generate_html_report(project: Project, report_data: Dict[str, Any]) -> str:
+    def _generate_html_report(
+        project: Project,
+        report_data: Dict[str, Any],
+        company_name: Optional[str] = None,
+        primary_color: Optional[str] = None
+    ) -> str:
         """Generate HTML report"""
+        theme_color = primary_color if primary_color else "#1e3a8a"
+        if theme_color and not theme_color.startswith('#'):
+            # Check if it is a hex code
+            if len(theme_color) in [3, 6, 8] and all(c in '0123456789abcdefABCDEF' for c in theme_color):
+                theme_color = f"#{theme_color}"
+
+        company_section = ""
+        if company_name:
+            company_section = f"""
+            <div style="text-align: center; margin-top: 10px; font-weight: bold; color: {theme_color}; text-transform: uppercase; font-size: 14px; letter-spacing: 1px;">
+                PREPARED BY / FOR: {company_name}
+            </div>
+            """
+
         html_content = f"""
         <!DOCTYPE html>
         <html>
         <head>
             <title>Project Report: {project.name}</title>
             <style>
-                body {{ font-family: Arial, sans-serif; margin: 40px; }}
-                .header {{ text-align: center; border-bottom: 2px solid #333; padding-bottom: 20px; }}
+                body {{ font-family: 'Inter', -apple-system, sans-serif; margin: 40px; background-color: #f8fafc; color: #334155; }}
+                .container {{ max-width: 900px; margin: auto; background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); border-top: 6px solid {theme_color}; }}
+                .header {{ text-align: center; border-bottom: 2px solid #f1f5f9; padding-bottom: 25px; margin-bottom: 30px; }}
+                .header h1 {{ color: {theme_color}; margin-bottom: 5px; font-size: 28px; }}
                 .section {{ margin: 30px 0; }}
+                .section h2 {{ color: {theme_color}; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px; font-size: 20px; }}
+                .section h3 {{ color: {theme_color}; font-size: 16px; margin-top: 20px; }}
                 .table {{ border-collapse: collapse; width: 100%; margin: 20px 0; }}
-                .table th, .table td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-                .table th {{ background-color: #f2f2f2; }}
-                .metric {{ background-color: #e8f4f8; padding: 10px; border-radius: 5px; margin: 10px 0; }}
+                .table th, .table td {{ border: 1px solid #e2e8f0; padding: 12px; text-align: left; }}
+                .table th {{ background-color: {theme_color}; color: white; font-weight: 600; }}
+                .table tr:nth-child(even) {{ background-color: #f8fafc; }}
+                .metric {{ border-left: 4px solid {theme_color}; background-color: #f1f5f9; padding: 15px; border-radius: 6px; margin: 15px 0; font-size: 14px; line-height: 1.6; }}
+                .footer {{ text-align: center; margin-top: 40px; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: 20px; }}
+                ul {{ padding-left: 20px; }}
+                li {{ margin-bottom: 8px; line-height: 1.5; }}
             </style>
         </head>
         <body>
-            <div class="header">
-                <h1>Project Report: {project.name}</h1>
-                <p>Generated on {report_data['generated_at'][:19]}</p>
-            </div>
-
-            <div class="section">
-                <h2>Project Information</h2>
-                <div class="metric">
-                    <strong>Project ID:</strong> {report_data['project_info']['id']}<br>
-                    <strong>Description:</strong> {report_data['project_info'].get('description', 'N/A')}<br>
-                    <strong>Created:</strong> {report_data['project_info']['created_at']}<br>
-                    <strong>Datasets:</strong> {report_data['project_info']['total_datasets']}<br>
-                    <strong>Models Trained:</strong> {report_data['project_info']['total_models']}
+            <div class="container">
+                <div class="header">
+                    <h1>Project Report: {project.name}</h1>
+                    {company_section}
+                    <p style="color: #64748b; font-size: 14px; margin-top: 8px;">Generated on {report_data['generated_at'][:19]}</p>
                 </div>
-            </div>
 
-            <div class="section">
-                <h2>Datasets Summary</h2>
-                <table class="table">
-                    <tr><th>Filename</th><th>Rows</th><th>Columns</th><th>Size</th></tr>
+                <div class="section">
+                    <h2>Project Information</h2>
+                    <div class="metric">
+                        <strong>Project ID:</strong> {report_data['project_info']['id']}<br>
+                        <strong>Description:</strong> {report_data['project_info'].get('description', 'N/A')}<br>
+                        <strong>Created:</strong> {report_data['project_info']['created_at']}<br>
+                        <strong>Datasets:</strong> {report_data['project_info']['total_datasets']}<br>
+                        <strong>Models Trained:</strong> {report_data['project_info']['total_models']}
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h2>Datasets Summary</h2>
+                    <table class="table">
+                        <thead>
+                            <tr><th>Filename</th><th>Rows</th><th>Columns</th><th>Size</th></tr>
+                        </thead>
+                        <tbody>
         """
 
         for ds in report_data["datasets_summary"]["datasets"]:
             html_content += f"""
-                    <tr>
-                        <td>{ds['filename']}</td>
-                        <td>{ds.get('rows', 'N/A')}</td>
-                        <td>{ds.get('cols', 'N/A')}</td>
-                        <td>{ds.get('size', 'N/A')}</td>
-                    </tr>
+                            <tr>
+                                <td>{ds['filename']}</td>
+                                <td>{ds.get('rows', 'N/A')}</td>
+                                <td>{ds.get('cols', 'N/A')}</td>
+                                <td>{ds.get('size', 'N/A')}</td>
+                            </tr>
             """
 
         html_content += """
-                </table>
-            </div>
+                        </tbody>
+                    </table>
+                </div>
         """
 
         # Add EDA section if available
-        if report_data["eda_results"]["available_analyses"]:
+        if report_data.get("eda_results") and "available_analyses" in report_data["eda_results"]:
             html_content += """
             <div class="section">
                 <h2>Exploratory Data Analysis</h2>
@@ -472,7 +530,7 @@ class ReportService:
             html_content += "</div>"
 
         # Add model results if available
-        if report_data["model_results"]["performance_metrics"]:
+        if report_data.get("model_results") and "performance_metrics" in report_data["model_results"]:
             html_content += """
             <div class="section">
                 <h2>Model Performance</h2>
@@ -482,7 +540,7 @@ class ReportService:
             if best_model:
                 html_content += f"""
                 <div class="metric">
-                    <h3>Best Performing Model</h3>
+                    <h3 style="margin-top: 0; margin-bottom: 10px;">Best Performing Model</h3>
                     <strong>Model:</strong> {best_model['name']}<br>
                     <strong>Score:</strong> {best_model['metrics'].get('score', 'N/A')}<br>
                     <strong>Created:</strong> {best_model['created_at']}
@@ -492,279 +550,40 @@ class ReportService:
             html_content += """
                 <h3>Model Comparison</h3>
                 <table class="table">
-                    <tr><th>Model Name</th><th>Primary Score</th><th>Status</th><th>Created</th></tr>
+                    <thead>
+                        <tr><th>Model Name</th><th>Primary Score</th><th>Status</th><th>Created</th></tr>
+                    </thead>
+                    <tbody>
             """
 
             for model in report_data["model_results"]["performance_metrics"]:
                 html_content += f"""
-                    <tr>
-                        <td>{model['name']}</td>
-                        <td>{model['metrics'].get('score', 'N/A')}</td>
-                        <td>{model.get('run_status', 'N/A')}</td>
-                        <td>{model['created_at'][:10]}</td>
-                    </tr>
+                        <tr>
+                            <td>{model['name']}</td>
+                            <td>{model['metrics'].get('score', 'N/A')}</td>
+                            <td>{model.get('run_status', 'N/A')}</td>
+                            <td>{model['created_at'][:10]}</td>
+                        </tr>
                 """
 
             html_content += """
+                    </tbody>
                 </table>
             </div>
         """
 
-        html_content += """
+        html_content += f"""
+                <div class="footer">
+                    Report generated automatically by Universal Analyst Model Platform.<br>
+                    &copy; {datetime.now().year} {company_name if company_name else "Universal Analyst"}. All rights reserved.
+                </div>
+            </div>
         </body>
         </html>
         """
 
         # Save to storage
         report_key = f"reports/project_{project.id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
-        storage.put_object(report_key, html_content.encode('utf-8'))
-
-        return report_key
-
-    @staticmethod
-    def _generate_prediction_summary_pdf(summary_data: Dict[str, Any], project_name: str) -> str:
-        """Generate PDF report for prediction summary"""
-        buffer = io.BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=A4)
-        styles = getSampleStyleSheet()
-        story = []
-
-        # Title
-        title_style = ParagraphStyle(
-            'CustomTitle',
-            parent=styles['Heading1'],
-            fontSize=24,
-            spaceAfter=30,
-            alignment=1  # Center
-        )
-        story.append(Paragraph(f"Prediction Summary Report: {project_name}", title_style))
-        story.append(Spacer(1, 12))
-
-        # Overview
-        story.append(Paragraph("Overview", styles['Heading2']))
-        overview_text = f"""
-        <b>Total Predictions:</b> {summary_data['total_predictions']}<br/>
-        <b>Generated:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-        """
-        story.append(Paragraph(overview_text, styles['Normal']))
-        story.append(Spacer(1, 12))
-
-        # Prediction Types
-        if summary_data['prediction_types']:
-            story.append(Paragraph("Prediction Analysis", styles['Heading2']))
-
-            if 'numeric' in summary_data['prediction_types']:
-                story.append(Paragraph("Numeric Predictions", styles['Heading3']))
-                numeric = summary_data['prediction_types']['numeric']
-                numeric_text = f"""
-                <b>Range:</b> {numeric['min']:.2f} - {numeric['max']:.2f}<br/>
-                <b>Mean:</b> {numeric['mean']:.2f}<br/>
-                <b>Median:</b> {numeric['median']:.2f}<br/>
-                <b>Standard Deviation:</b> {numeric['std']:.2f}<br/>
-                <b>Unique Values:</b> {numeric['unique_values']}
-                """
-                story.append(Paragraph(numeric_text, styles['Normal']))
-
-                if 'prediction_ranges' in summary_data['statistics']:
-                    ranges = summary_data['statistics']['prediction_ranges']
-                    ranges_text = f"""
-                    <b>Low Range:</b> {ranges['low']}<br/>
-                    <b>Medium Range:</b> {ranges['medium']}<br/>
-                    <b>High Range:</b> {ranges['high']}
-                    """
-                    story.append(Paragraph(ranges_text, styles['Normal']))
-
-            if 'categorical' in summary_data['prediction_types']:
-                story.append(Paragraph("Categorical Predictions", styles['Heading3']))
-                categorical = summary_data['prediction_types']['categorical']
-                categorical_text = f"""
-                <b>Unique Classes:</b> {categorical['unique_values']}<br/>
-                <b>Most Common:</b> {categorical['most_common']}<br/>
-                <b>Least Common:</b> {categorical['least_common']}<br/>
-                <b>Entropy:</b> {categorical['entropy']:.3f}
-                """
-                story.append(Paragraph(categorical_text, styles['Normal']))
-
-                # Class distribution table
-                if 'class_distribution' in summary_data['statistics']:
-                    story.append(Paragraph("Class Distribution", styles['Heading4']))
-                    dist = summary_data['statistics']['class_distribution']
-                    dist_data = [
-                        ["Class", "Percentage"],
-                        [dist['majority_class'], f"{dist['majority_percentage']:.1f}%"],
-                        [dist['minority_class'], f"{dist['minority_percentage']:.1f}%"]
-                    ]
-                    dist_table = Table(dist_data)
-                    dist_table.setStyle(TableStyle([
-                        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-                        ('GRID', (0, 0), (-1, -1), 1, colors.black)
-                    ]))
-                    story.append(dist_table)
-
-        # Data Quality
-        if 'data_quality' in summary_data['statistics']:
-            story.append(Paragraph("Data Quality", styles['Heading2']))
-            quality = summary_data['statistics']['data_quality']
-            quality_text = f"""
-            <b>Null Predictions:</b> {'Yes' if quality['has_null_predictions'] else 'No'}<br/>
-            """
-            if 'prediction_variance' in quality:
-                quality_text += f"<b>Variance:</b> {quality['prediction_variance']:.2f}<br/>"
-            if 'outlier_count' in quality:
-                quality_text += f"<b>Outliers:</b> {quality['outlier_count']}<br/>"
-            story.append(Paragraph(quality_text, styles['Normal']))
-
-        # Confidence Analysis
-        if 'confidence' in summary_data['statistics']:
-            story.append(Paragraph("Confidence Analysis", styles['Heading2']))
-            confidence = summary_data['statistics']['confidence']
-            confidence_text = f"""
-            <b>Mean Confidence:</b> {confidence['mean_confidence']:.2%}<br/>
-            <b>High Confidence Ratio:</b> {confidence['high_confidence_ratio']:.1%}<br/>
-            <b>Low Confidence Ratio:</b> {confidence['low_confidence_ratio']:.1%}<br/>
-            <b>Confidence Range:</b> {confidence['min_confidence']:.1%} - {confidence['max_confidence']:.1%}
-            """
-            story.append(Paragraph(confidence_text, styles['Normal']))
-
-        # Footer
-        story.append(Spacer(1, 24))
-        footer_text = f"Report generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        story.append(Paragraph(footer_text, styles['Normal']))
-
-        # Build PDF
-        doc.build(story)
-
-        # Save to storage
-        buffer.seek(0)
-        report_key = f"prediction_summaries/project_{project_name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-        storage.put_object(report_key, buffer.read())
-
-        return report_key
-
-    @staticmethod
-    def _generate_prediction_summary_html(summary_data: Dict[str, Any], project_name: str) -> str:
-        """Generate HTML report for prediction summary"""
-        html_content = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Prediction Summary Report: {project_name}</title>
-            <style>
-                body {{ font-family: Arial, sans-serif; margin: 40px; }}
-                .header {{ text-align: center; border-bottom: 2px solid #333; padding-bottom: 20px; }}
-                .section {{ margin: 30px 0; }}
-                .table {{ border-collapse: collapse; width: 100%; margin: 20px 0; }}
-                .table th, .table td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-                .table th {{ background-color: #f2f2f2; }}
-                .metric {{ background-color: #e8f4f8; padding: 10px; border-radius: 5px; margin: 10px 0; }}
-                .stats-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; }}
-                .stat-card {{ background: #f9f9f9; padding: 15px; border-radius: 8px; }}
-            </style>
-        </head>
-        <body>
-            <div class="header">
-                <h1>Prediction Summary Report: {project_name}</h1>
-                <p>Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
-            </div>
-
-            <div class="section">
-                <h2>Overview</h2>
-                <div class="metric">
-                    <strong>Total Predictions:</strong> {summary_data['total_predictions']}
-                </div>
-            </div>
-        """
-
-        # Prediction Types
-        if summary_data['prediction_types']:
-            html_content += """
-            <div class="section">
-                <h2>Prediction Analysis</h2>
-                <div class="stats-grid">
-            """
-
-            if 'numeric' in summary_data['prediction_types']:
-                numeric = summary_data['prediction_types']['numeric']
-                html_content += f"""
-                <div class="stat-card">
-                    <h3>Numeric Predictions</h3>
-                    <p><strong>Range:</strong> {numeric['min']:.2f} - {numeric['max']:.2f}</p>
-                    <p><strong>Mean:</strong> {numeric['mean']:.2f}</p>
-                    <p><strong>Median:</strong> {numeric['median']:.2f}</p>
-                    <p><strong>Std Dev:</strong> {numeric['std']:.2f}</p>
-                    <p><strong>Unique Values:</strong> {numeric['unique_values']}</p>
-                </div>
-                """
-
-            if 'categorical' in summary_data['prediction_types']:
-                categorical = summary_data['prediction_types']['categorical']
-                html_content += f"""
-                <div class="stat-card">
-                    <h3>Categorical Predictions</h3>
-                    <p><strong>Unique Classes:</strong> {categorical['unique_values']}</p>
-                    <p><strong>Most Common:</strong> {categorical['most_common']}</p>
-                    <p><strong>Least Common:</strong> {categorical['least_common']}</p>
-                    <p><strong>Entropy:</strong> {categorical['entropy']:.3f}</p>
-                </div>
-                """
-
-            html_content += "</div>"
-
-            # Class distribution table
-            if 'class_distribution' in summary_data['statistics']:
-                dist = summary_data['statistics']['class_distribution']
-                html_content += f"""
-                <h3>Class Distribution</h3>
-                <table class="table">
-                    <tr><th>Class</th><th>Percentage</th></tr>
-                    <tr><td>{dist['majority_class']}</td><td>{dist['majority_percentage']:.1f}%</td></tr>
-                    <tr><td>{dist['minority_class']}</td><td>{dist['minority_percentage']:.1f}%</td></tr>
-                </table>
-                """
-
-        # Data Quality
-        if 'data_quality' in summary_data['statistics']:
-            quality = summary_data['statistics']['data_quality']
-            html_content += """
-            <div class="section">
-                <h2>Data Quality</h2>
-                <div class="metric">
-            """
-            html_content += f"<p><strong>Null Predictions:</strong> {'Yes' if quality['has_null_predictions'] else 'No'}</p>"
-            if 'prediction_variance' in quality:
-                html_content += f"<p><strong>Variance:</strong> {quality['prediction_variance']:.2f}</p>"
-            if 'outlier_count' in quality:
-                html_content += f"<p><strong>Outliers:</strong> {quality['outlier_count']}</p>"
-            html_content += "</div></div>"
-
-        # Confidence Analysis
-        if 'confidence' in summary_data['statistics']:
-            confidence = summary_data['statistics']['confidence']
-            html_content += """
-            <div class="section">
-                <h2>Confidence Analysis</h2>
-                <div class="metric">
-            """
-            html_content += f"""
-            <p><strong>Mean Confidence:</strong> {confidence['mean_confidence']:.1%}</p>
-            <p><strong>High Confidence Ratio:</strong> {confidence['high_confidence_ratio']:.1%}</p>
-            <p><strong>Low Confidence Ratio:</strong> {confidence['low_confidence_ratio']:.1%}</p>
-            <p><strong>Confidence Range:</strong> {confidence['min_confidence']:.1%} - {confidence['max_confidence']:.1%}</p>
-            """
-            html_content += "</div></div>"
-
-        html_content += """
-        </body>
-        </html>
-        """
-
-        # Save to storage
-        report_key = f"prediction_summaries/project_{project_name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
         storage.put_object(report_key, html_content.encode('utf-8'))
 
         return report_key

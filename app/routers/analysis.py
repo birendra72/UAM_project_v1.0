@@ -8,6 +8,7 @@ import os
 from app.db.session import get_db, SessionLocal
 from app.db.models import Dataset, Project, Run, Artifact, ProjectDataset, ModelMeta
 from app.dependencies.auth import get_current_user
+from app.config import settings
 from app.workers.tasks import run_eda
 from app.storage import storage
 from app.services.ml_service import MLService
@@ -128,35 +129,31 @@ def run_eda_sync(run_id: str):
     finally:
         db.close()
 
+from app.services.eda_service import EDAService
+
 router = APIRouter()
 
-@router.get("/")
-def list_analysis(
+@router.post("/eda/advanced")
+async def start_advanced_eda(
+    dataset_id: str,
+    project_id: str,
+    target_column: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
-    """
-    List all analysis runs for the current user
-    """
-    # Get all analysis runs for the user's projects
-    runs = db.query(Run).join(Project).filter(
-        Project.user_id == current_user.id
-    ).all()
-
-    return [
-        {
-            "id": run.id,
-            "project_id": run.project_id,
-            "dataset_id": run.dataset_id,
-            "status": run.status,
-            "current_task": run.current_task,
-            "progress": run.progress,
-            "started_at": str(run.started_at) if run.started_at else None,
-            "finished_at": str(run.finished_at) if run.finished_at else None,
-            "parameters_json": run.parameters_json
-        }
-        for run in runs
-    ]
+    try:
+        result = EDAService.generate_advanced_eda(
+            project_id=project_id,
+            user_id=str(current_user.id),
+            dataset_id=dataset_id,
+            target_column=target_column,
+            db=db
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Advanced EDA failed: {str(e)}")
 
 @router.post("/eda")
 async def start_eda(
@@ -185,14 +182,14 @@ async def start_eda(
     db.commit()
     db.refresh(run)
 
-    # Run EDA synchronously instead of using Celery
+    # Run EDA asynchronously using Celery
     try:
-        await asyncio.get_event_loop().run_in_executor(None, run_eda_sync, str(run.id))
-        return {"message": "EDA completed", "run_id": str(run.id)}
+        run_eda.delay(str(run.id))
+        return {"message": "EDA started successfully", "run_id": str(run.id)}
     except Exception as e:
         run.status = "FAILED"
         db.commit()
-        raise HTTPException(status_code=500, detail=f"EDA failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to queue EDA: {str(e)}")
 
 @router.get("/eda/{run_id}/status")
 def get_eda_status(run_id: str, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
@@ -328,14 +325,14 @@ def generateEDA(
         db.commit()
         db.refresh(run)
 
-        # Run EDA synchronously
+        # Run EDA asynchronously using Celery
         try:
-            run_eda_sync(str(run.id))
+            run_eda.delay(str(run.id))
             return {"message": "EDA started successfully", "run_id": str(run.id)}
         except Exception as e:
             run.status = "FAILED"
             db.commit()
-            raise HTTPException(status_code=500, detail=f"EDA failed: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Failed to queue EDA: {str(e)}")
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -360,10 +357,9 @@ def getEDAResults(
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
 
-        # Get the latest EDA run for this project
+        # Get the latest run for this project
         latest_run = db.query(Run).filter(
-            Run.project_id == project_id,
-            Run.parameters_json != None  # EDA runs have empty parameters
+            Run.project_id == project_id
         ).order_by(Run.started_at.desc()).first()
 
         if not latest_run:
@@ -373,38 +369,38 @@ def getEDAResults(
                 "message": "No EDA runs found for this project"
             }
 
-        # Get EDA artifacts
-        artifacts = db.query(Artifact).filter(
+        # If run is not completed, return status
+        if latest_run.status != "COMPLETED":
+            return {
+                "run_id": str(latest_run.id),
+                "status": latest_run.status,
+                "message": f"EDA analysis is currently {latest_run.status.lower()}"
+            }
+
+        # Check for eda_results artifact
+        artifact = db.query(Artifact).filter(
             Artifact.run_id == latest_run.id,
-            Artifact.type.in_(["eda_summary", "eda_chart"])
-        ).all()
+            Artifact.type == "eda_results"
+        ).first()
 
-        results = {
-            "run_id": str(latest_run.id),
-            "status": latest_run.status,
-            "created_at": str(latest_run.started_at) if latest_run.started_at else None
-        }
+        if artifact:
+            # Load the complete results from storage
+            try:
+                results_data = storage.get_object(artifact.storage_key)
+                return json.loads(results_data.read().decode('utf-8'))
+            except Exception as e:
+                # Fallback to dynamic generation if load fails
+                pass
 
-        if artifacts:
-            for artifact in artifacts:
-                if artifact.type == "eda_summary":
-                    # Load summary from storage
-                    summary_data = storage.get_object(artifact.storage_key)
-                    results["summary"] = json.loads(summary_data.read().decode())
-                elif artifact.type == "eda_chart":
-                    # Generate presigned URL for chart
-                    results["chart_url"] = storage.get_presigned_url(artifact.storage_key)
+        # Fallback: compute dynamically using EDAService
+        from app.services.eda_service import EDAService
+        try:
+            return EDAService.get_eda_results(project_id, current_user.id, db)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to compile EDA results: {str(e)}")
 
-        # Mock additional EDA results for now
-        results.update({
-            "correlations": {},
-            "insights": [],
-            "distributions": {},
-            "outliers": {}
-        })
-
-        return results
-
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get EDA results: {str(e)}")
 
@@ -664,30 +660,84 @@ async def train_with_custom_hyperparameters(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Training failed: {str(e)}")
 
-# WebSocket connection manager for real-time training updates
+# WebSocket connection manager for real-time training updates with Redis Pub/Sub support
+import redis.asyncio as aioredis
+
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[str, List[WebSocket]] = {}
+        self.redis_client = None
+        self.listener_tasks: Dict[str, asyncio.Task] = {}
 
     async def connect(self, project_id: str, websocket: WebSocket):
         await websocket.accept()
         if project_id not in self.active_connections:
             self.active_connections[project_id] = []
         self.active_connections[project_id].append(websocket)
+        
+        # Start a Redis listener task for this project if not already running
+        if project_id not in self.listener_tasks:
+            self.listener_tasks[project_id] = asyncio.create_task(self._redis_listener(project_id))
 
-    def disconnect(self, project_id: str, websocket: WebSocket):
+    async def disconnect(self, project_id: str, websocket: WebSocket):
         if project_id in self.active_connections:
-            self.active_connections[project_id].remove(websocket)
+            try:
+                self.active_connections[project_id].remove(websocket)
+            except ValueError:
+                pass
             if not self.active_connections[project_id]:
                 del self.active_connections[project_id]
+                # Cancel the Redis listener task since no clients are connected
+                if project_id in self.listener_tasks:
+                    self.listener_tasks[project_id].cancel()
+                    del self.listener_tasks[project_id]
 
-    async def broadcast(self, project_id: str, message: dict):
+    async def _redis_listener(self, project_id: str):
+        try:
+            # Initialize Redis client if not done
+            if not self.redis_client:
+                self.redis_client = aioredis.from_url(settings.REDIS_URL)
+            
+            pubsub = self.redis_client.pubsub()
+            channel_name = f"project:{project_id}:progress"
+            await pubsub.subscribe(channel_name)
+            
+            while True:
+                try:
+                    message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                    if message and message.get("type") == "message":
+                        data = json.loads(message["data"].decode('utf-8'))
+                        # Broadcast to all connected clients for this project
+                        await self._local_broadcast(project_id, data)
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logging.error(f"Error reading from Redis pubsub: {e}")
+                await asyncio.sleep(0.1)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logging.error(f"Error in Redis listener for project {project_id}: {e}")
+
+    async def _local_broadcast(self, project_id: str, message: dict):
         if project_id in self.active_connections:
             for connection in self.active_connections[project_id]:
                 try:
                     await connection.send_json(message)
                 except Exception as e:
-                    logging.error(f"Failed to send message to websocket: {e}")
+                    logging.error(f"Failed to send local broadcast to websocket: {e}")
+
+    async def broadcast(self, project_id: str, message: dict):
+        # Publish the message to Redis so all FastAPI instances can receive it and broadcast locally
+        try:
+            if not self.redis_client:
+                self.redis_client = aioredis.from_url(settings.REDIS_URL)
+            channel_name = f"project:{project_id}:progress"
+            await self.redis_client.publish(channel_name, json.dumps(message))
+        except Exception as e:
+            logging.error(f"Failed to publish to Redis Pub/Sub: {e}")
+            # Fallback to local broadcast
+            await self._local_broadcast(project_id, message)
 
 manager = ConnectionManager()
 
@@ -706,7 +756,7 @@ async def training_progress_websocket(
             data = await websocket.receive_text()
             # Could handle client messages here if needed
     except WebSocketDisconnect:
-        manager.disconnect(project_id, websocket)
+        await manager.disconnect(project_id, websocket)
 
 # Enhanced training function with progress updates
 async def train_auto_ml_with_progress(

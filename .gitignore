@@ -132,11 +132,16 @@ dmypy.json
 
 # Project specific
 uam.db
+uam_test.db
+*.db
+*.db-journal
 storage/
 tests/__pycache__/
 .vscode/
 .pytest_cache/
 .github/
+uvicorn_log.txt
+verification_results/
 
 # Deployment sensitive files
 DEPLOYMENT_LINKS.md

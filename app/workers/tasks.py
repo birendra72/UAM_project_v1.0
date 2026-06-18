@@ -1,6 +1,6 @@
 from celery import shared_task
 from app.db.session import SessionLocal
-from app.db.models import Run, Log, Artifact, Dataset
+from app.db.models import Run, Log, Artifact, Dataset, EDAReport, DataLineage
 from app.storage import storage
 import pandas as pd
 import joblib
@@ -33,6 +33,23 @@ def predict_batch_task(self, task_id, model_key, input_file_key, batch_size=1000
             data = json.loads(input_data)
             df = pd.DataFrame(data)
 
+        # Align and validate columns if feature names are present
+        feature_names = None
+        if hasattr(model, 'feature_names_in_'):
+            feature_names = model.feature_names_in_.tolist()
+        elif hasattr(model, 'steps') and len(model.steps) > 0:
+            # If pipeline, check the final step or first step
+            for name, step in model.steps:
+                if hasattr(step, 'feature_names_in_'):
+                    feature_names = step.feature_names_in_.tolist()
+                    break
+
+        if feature_names:
+            missing = list(set(feature_names) - set(df.columns))
+            if missing:
+                raise ValueError(f"Input file is missing required model features: {', '.join(missing)}")
+            df = df[feature_names]
+
         total_rows = len(df)
         predictions = []
 
@@ -42,7 +59,7 @@ def predict_batch_task(self, task_id, model_key, input_file_key, batch_size=1000
             batch_predictions = model.predict(batch_df)  # type: ignore
             predictions.extend(batch_predictions.tolist())
 
-            # Update progress (in production, store in Redis/database)
+            # Update progress
             progress = min((i + len(batch_df)) / total_rows, 1.0)
             self.update_state(state='PROGRESS', meta={'progress': progress})
 
@@ -86,8 +103,20 @@ def preprocess_data(self, run_id, dataset_key):
         data_bytes = storage.get_object(dataset_key)
         df = pd.read_csv(io.BytesIO(data_bytes.read()))  # type: ignore
 
-        # Simple preprocessing example: drop NA
-        df_clean = df.dropna()
+        # Type-aware imputation strategy to prevent empty datasets from dropping rows
+        df_clean = df.copy()
+        for col in df_clean.columns:
+            if df_clean[col].isnull().any():
+                if pd.api.types.is_numeric_dtype(df_clean[col]):
+                    median_val = df_clean[col].median()
+                    # Fallback to 0 if entire column is NaN
+                    if pd.isna(median_val):
+                        median_val = 0.0
+                    df_clean[col] = df_clean[col].fillna(median_val)
+                else:
+                    mode_series = df_clean[col].mode()
+                    mode_val = mode_series[0] if not mode_series.empty else 'Unknown'
+                    df_clean[col] = df_clean[col].fillna(mode_val)
 
         # Save cleaned dataset back to storage
         cleaned_key = f"cleaned/{uuid.uuid4()}.csv"
@@ -132,64 +161,92 @@ def run_eda(self, run_id):
         run.current_task = "EDA"
         db.commit()
 
-        # Get dataset from run
-        dataset = db.query(Dataset).filter(Dataset.id == run.dataset_id).first()
-        if not dataset:
-            raise Exception("Dataset not found")
+        # Retrieve project and user_id to leverage EDAService
+        project = run.project
+        if not project:
+            raise Exception("Project associated with run not found")
 
-        data_bytes = storage.get_object(dataset.storage_key)
-        df = pd.read_csv(io.BytesIO(data_bytes.read()))  # type: ignore
+        # Get datasets for the project
+        datasets = db.query(Dataset).join(ProjectDataset).filter(
+            ProjectDataset.project_id == run.project_id
+        ).all()
 
-        # Generate summary stats
-        summary = {
-            "shape": df.shape,
-            "columns": list(df.columns),
-            "dtypes": df.dtypes.astype(str).to_dict(),
-            "missing_values": df.isnull().sum().to_dict(),
-            "describe": df.describe().to_dict()
+        if not datasets:
+            raise Exception("No datasets found for this project")
+
+        from app.services.eda_service import EDAService
+
+        # Combine all datasets for analysis
+        combined_df = EDAService._combine_datasets(datasets)
+
+        # Generate insights (actual analysis)
+        insights = EDAService._generate_insights(combined_df)
+
+        # Generate outliers data
+        outliers_data = EDAService._generate_outliers_data(combined_df)
+
+        # Structure complete results for the frontend
+        results_data = {
+            "run_id": run_id,
+            "status": "completed",
+            "created_at": str(run.started_at) if run.started_at else None,
+            "results": {
+                "summary": insights["data_quality"],
+                "correlations": insights["correlations"],
+                "insights": insights["recommendations"],
+                "distributions": insights["distributions"],
+                "outliers": outliers_data
+            }
         }
 
-        # Save summary as JSON artifact
-        summary_key = f"eda/{uuid.uuid4()}.json"
-        storage.put_object(summary_key, json.dumps(summary).encode())
+        # Save results as JSON artifact in storage
+        results_key = f"eda/results/{run_id}.json"
+        storage.put_object(results_key, json.dumps(results_data).encode('utf-8'))
 
-        artifact_summary = Artifact(
+        # Save artifact record in DB
+        artifact = Artifact(
             run_id=run_id,
-            type="eda_summary",
-            storage_key=summary_key,
-            filename=os.path.basename(summary_key),
-            metadata_json={"description": "EDA summary statistics"}
+            type="eda_results",
+            storage_key=results_key,
+            filename=f"eda_results_{run_id}.json",
+            metadata_json={
+                "description": "Complete EDA results including correlations, distributions, outliers, and insights",
+                "rows": len(combined_df),
+                "cols": len(combined_df.columns)
+            }
         )
-        db.add(artifact_summary)
+        db.add(artifact)
 
-        # Generate charts using Plotly (for interactive JSON)
-        import plotly.graph_objects as go
-        import plotly.io as pio
+        # Save EDAReport record in DB
+        data_quality_score = 100.0 - float(insights["data_quality"]["missing_data_percentage"])
+        if insights["data_quality"]["duplicate_rows"] > 0:
+            data_quality_score -= min(10.0, float(insights["data_quality"]["duplicate_rows"]) / len(combined_df) * 100)
+        data_quality_score = max(0.0, min(100.0, data_quality_score))
 
-        # Histogram for first numeric column
-        numeric_cols = df.select_dtypes(include=['number']).columns
-        if len(numeric_cols) > 0:
-            fig = go.Figure()
-            fig.add_trace(go.Histogram(x=df[numeric_cols[0]], nbinsx=30))
-            fig.update_layout(title=f"Histogram of {numeric_cols[0]}", xaxis_title=numeric_cols[0], yaxis_title="Count")
-            chart_json = pio.to_json(fig)
-            if chart_json is None:
-                chart_json = "{}"
+        eda_report_db = EDAReport(
+            project_id=run.project_id,
+            dataset_id=datasets[0].id,
+            summary_metrics=insights["data_quality"],
+            data_quality_score=data_quality_score,
+            outliers_json=outliers_data,
+            correlations_json=insights.get("correlations", {}),
+            storage_key=results_key
+        )
+        db.add(eda_report_db)
 
-            chart_key = f"eda/{uuid.uuid4()}.json"
-            storage.put_object(chart_key, chart_json.encode())
-
-            artifact_chart = Artifact(
-                run_id=run_id,
-                type="eda_chart",
-                storage_key=chart_key,
-                filename=os.path.basename(chart_key),
-                metadata_json={"description": f"Interactive histogram of {numeric_cols[0]}"}
-            )
-            db.add(artifact_chart)
-
+        # Save DataLineage record in DB
+        lineage = DataLineage(
+            dataset_id=datasets[0].id,
+            operation_type="eda",
+            input_storage_key=datasets[0].storage_key,
+            output_storage_key=results_key,
+            parameters_json={"run_id": run_id},
+            executed_by=project.user_id
+        )
+        db.add(lineage)
         db.commit()
 
+        # Update run status
         run.progress = 1.0
         run.status = "COMPLETED"
         run.current_task = None

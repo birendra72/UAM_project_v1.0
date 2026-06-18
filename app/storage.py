@@ -84,51 +84,54 @@ class LocalStorage(StorageBackend):
 
 class S3MinIOClient(StorageBackend):
     def __init__(self, endpoint: str, access_key: str, secret_key: str, bucket: str, secure: bool = False):
-        self.client = Minio(
-            endpoint,
-            access_key=access_key,
-            secret_key=secret_key,
-            secure=secure
-        )
         self.bucket = bucket
-        if not self.client.bucket_exists(self.bucket):
-            self.client.make_bucket(self.bucket)
+        # Initialize boto3 S3 client to handle custom endpoints with paths (like Supabase S3 URL)
+        self.client = boto3.client(
+            's3',
+            endpoint_url=endpoint,
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            config=Config(signature_version='s3v4'),
+            region_name='us-east-1'
+        )
 
     def upload_fileobj(self, key: str, fileobj: BinaryIO, metadata: Optional[dict] = None) -> str:
-        self.client.put_object(
-            self.bucket,
-            key,
-            fileobj,
-            length=-1,
-            part_size=10*1024*1024,  # 10MB
-            metadata=metadata or {}
-        )
+        extra_args = {}
+        if metadata:
+            extra_args['Metadata'] = {k: str(v) for k, v in metadata.items()}
+        self.client.upload_fileobj(fileobj, self.bucket, key, ExtraArgs=extra_args)
         return key
 
     def put_object(self, key: str, data: bytes, metadata: Optional[dict] = None) -> str:
-        from io import BytesIO
-        fileobj = BytesIO(data)
-        return self.upload_fileobj(key, fileobj, metadata)
+        extra_args = {}
+        if metadata:
+            extra_args['Metadata'] = {k: str(v) for k, v in metadata.items()}
+        self.client.put_object(Body=data, Bucket=self.bucket, Key=key, **extra_args)
+        return key
 
     def get_presigned_url(self, key: str, expiry_seconds: int = 3600) -> str:
-        return self.client.presigned_get_object(self.bucket, key, expires=timedelta(seconds=expiry_seconds))
+        return self.client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': self.bucket, 'Key': key},
+            ExpiresIn=expiry_seconds
+        )
 
     def get_object(self, key: str) -> IO[bytes]:
-        from typing import cast
-        response = self.client.get_object(self.bucket, key)
-        return cast(IO[bytes], response)  # MinIO response is file-like
+        response = self.client.get_object(Bucket=self.bucket, Key=key)
+        return response['Body']
 
     def download_stream(self, key: str) -> IO[bytes]:
-        from typing import cast
-        response = self.client.get_object(self.bucket, key)
-        return cast(IO[bytes], response)  # MinIO response is file-like
+        response = self.client.get_object(Bucket=self.bucket, Key=key)
+        return response['Body']
 
     def list_prefix(self, prefix: str) -> list[str]:
-        objects = self.client.list_objects(self.bucket, prefix=prefix)
-        return [obj.object_name for obj in objects]
+        response = self.client.list_objects_v2(Bucket=self.bucket, Prefix=prefix)
+        if 'Contents' not in response:
+            return []
+        return [obj['Key'] for obj in response['Contents']]
 
     def delete_file(self, key: str) -> None:
-        self.client.remove_object(self.bucket, key)
+        self.client.delete_object(Bucket=self.bucket, Key=key)
 
 
 # Factory function

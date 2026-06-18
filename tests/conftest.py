@@ -12,9 +12,12 @@ from app.db.models import Base
 from app.config import settings
 
 # Test database URL
-TEST_DATABASE_URL = "postgresql://uam:uam_pass@localhost:5432/uam_test_db"
+TEST_DATABASE_URL = "sqlite:///./uam_test.db"
 
-engine = create_engine(TEST_DATABASE_URL, pool_pre_ping=True)
+if TEST_DATABASE_URL.startswith("sqlite"):
+    engine = create_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
+else:
+    engine = create_engine(TEST_DATABASE_URL, pool_pre_ping=True)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 @pytest.fixture(scope="session")

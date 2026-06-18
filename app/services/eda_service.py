@@ -3,7 +3,6 @@ from typing import Optional, Dict, Any
 import pandas as pd
 import json
 import uuid
-from ydata_profiling import ProfileReport
 from app.db.models import Project as ProjectModel, Dataset, ProjectDataset
 from app.storage import storage
 
@@ -50,6 +49,7 @@ class EDAService:
         # Generate ydata-profiling report with error handling
         profile_report_data = None
         try:
+            from ydata_profiling import ProfileReport
             profile = ProfileReport(
                 combined_df,
                 title=f"EDA Report - {project.name}",
@@ -404,3 +404,212 @@ class EDAService:
             profile["variables"][col] = var_info
 
         return profile
+
+    @staticmethod
+    def generate_advanced_eda(
+        project_id: str,
+        user_id: str,
+        dataset_id: str,
+        target_column: Optional[str],
+        db: Session
+    ) -> Dict[str, Any]:
+        """
+        Generate advanced statistical and machine learning insights (PCA, Isolation Forest, Mutual Information).
+        """
+        from app.db.models import Project as ProjectModel, Dataset, EDAReport, DataLineage
+        import numpy as np
+
+        # Verify project ownership
+        project = db.query(ProjectModel).filter(
+            ProjectModel.id == project_id,
+            ProjectModel.user_id == user_id
+        ).first()
+        if not project:
+            raise ValueError("Project not found")
+
+        # Get dataset
+        dataset = db.query(Dataset).filter(
+            Dataset.id == dataset_id,
+            Dataset.user_id == user_id
+        ).first()
+        if not dataset:
+            raise ValueError("Dataset not found")
+
+        # Load dataframe
+        file_obj = storage.download_stream(dataset.storage_key)
+        df = pd.read_csv(file_obj)
+
+        # Basic stats
+        total_rows = len(df)
+        total_cols = len(df.columns)
+        
+        # Select numeric columns for advanced ML analysis
+        numeric_cols = [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col]) and not pd.api.types.is_complex_dtype(df[col])]
+        
+        # Impute temporary df for ML models
+        df_imputed = df[numeric_cols].copy()
+        for col in df_imputed.columns:
+            median_val = df_imputed[col].median()
+            if pd.isna(median_val):
+                median_val = 0.0
+            df_imputed[col] = df_imputed[col].fillna(median_val)
+
+        # 1. Isolation Forest Outlier Detection
+        outliers_count_iforest = 0
+        iforest_details = {}
+        if len(numeric_cols) > 0 and total_rows > 5:
+            try:
+                from sklearn.ensemble import IsolationForest
+                clf = IsolationForest(contamination=0.05, random_state=42)
+                preds = clf.fit_predict(df_imputed)
+                outliers_mask = preds == -1
+                outliers_count_iforest = int(np.sum(outliers_mask))
+                iforest_details = {
+                    "method": "Isolation Forest",
+                    "contamination_threshold": 0.05,
+                    "outliers_detected": outliers_count_iforest,
+                    "outliers_percentage": round((outliers_count_iforest / total_rows) * 100, 2)
+                }
+            except Exception as e:
+                iforest_details = {"error": f"Isolation forest failed: {str(e)}"}
+
+        # 2. PCA (Principal Component Analysis)
+        pca_details = {}
+        if len(numeric_cols) >= 2 and total_rows > 5:
+            try:
+                from sklearn.preprocessing import StandardScaler
+                from sklearn.decomposition import PCA
+                scaler = StandardScaler()
+                scaled_data = scaler.fit_transform(df_imputed)
+                
+                n_comps = min(3, len(numeric_cols))
+                pca = PCA(n_components=n_comps)
+                pca.fit(scaled_data)
+                
+                pca_details = {
+                    "explained_variance_ratio": [round(float(v), 4) for v in pca.explained_variance_ratio_],
+                    "cumulative_variance": round(float(np.sum(pca.explained_variance_ratio_)), 4),
+                    "components_loadings": {
+                        f"PC{i+1}": {
+                            col: round(float(loading), 4)
+                            for col, loading in zip(numeric_cols, pca.components_[i])
+                        }
+                        for i in range(n_comps)
+                    }
+                }
+            except Exception as e:
+                pca_details = {"error": f"PCA failed: {str(e)}"}
+
+        # 3. Mutual Information (Feature Importance)
+        mutual_info_scores = {}
+        if target_column and target_column in df.columns:
+            try:
+                # Prepare target and features
+                y = df[target_column].copy()
+                X_cols = [c for c in numeric_cols if c != target_column]
+                
+                if len(X_cols) > 0:
+                    # Impute target
+                    if pd.api.types.is_numeric_dtype(y):
+                        y_imputed = y.fillna(y.median() if not pd.isna(y.median()) else 0.0)
+                        is_classification = y_imputed.nunique() < 10
+                    else:
+                        y_imputed = y.fillna(y.mode()[0] if not y.mode().empty else "Unknown")
+                        is_classification = True
+                    
+                    X = df_imputed[X_cols]
+                    
+                    if is_classification:
+                        from sklearn.feature_selection import mutual_info_classif
+                        scores = mutual_info_classif(X, y_imputed, random_state=42)
+                    else:
+                        from sklearn.feature_selection import mutual_info_regression
+                        scores = mutual_info_regression(X, y_imputed, random_state=42)
+                        
+                    mutual_info_scores = {
+                        col: round(float(score), 4)
+                        for col, score in zip(X_cols, scores)
+                    }
+                    # Sort scores descending
+                    mutual_info_scores = dict(sorted(mutual_info_scores.items(), key=lambda item: item[1], reverse=True))
+            except Exception as e:
+                mutual_info_scores = {"error": f"Mutual information calculation failed: {str(e)}"}
+
+        # 4. Correlation Matrices (Pearson & Spearman)
+        pearson_corr = {}
+        spearman_corr = {}
+        if len(numeric_cols) > 1:
+            try:
+                p_corr = df[numeric_cols].corr(method='pearson')
+                s_corr = df[numeric_cols].corr(method='spearman')
+                
+                # Format matrices as serializable dicts
+                for col in numeric_cols:
+                    pearson_corr[col] = {k: round(float(v), 4) if not pd.isna(v) else None for k, v in p_corr[col].items()}
+                    spearman_corr[col] = {k: round(float(v), 4) if not pd.isna(v) else None for k, v in s_corr[col].items()}
+            except Exception as e:
+                pearson_corr = {"error": f"Pearson corr failed: {str(e)}"}
+
+        # Calculate data quality score
+        missing_data_pct = round((df.isnull().sum().sum() / (total_rows * total_cols)) * 100, 2)
+        duplicate_rows = int(df.duplicated().sum())
+        data_quality_score = 100.0 - missing_data_pct
+        if duplicate_rows > 0:
+            data_quality_score -= min(10.0, (duplicate_rows / total_rows) * 100)
+        data_quality_score = max(0.0, min(100.0, data_quality_score))
+
+        # Structure results
+        advanced_report = {
+            "summary_metrics": {
+                "total_rows": total_rows,
+                "total_columns": total_cols,
+                "missing_data_percentage": missing_data_pct,
+                "duplicate_rows": duplicate_rows,
+                "data_quality_score": data_quality_score
+            },
+            "outliers_analysis": iforest_details,
+            "dimensionality_reduction": pca_details,
+            "feature_importance": mutual_info_scores,
+            "correlations": {
+                "pearson": pearson_corr,
+                "spearman": spearman_corr
+            }
+        }
+
+        # Save to storage
+        storage_key = f"eda/advanced_{project_id}_{uuid.uuid4()}.json"
+        import io
+        storage.upload_fileobj(storage_key, io.BytesIO(json.dumps(advanced_report).encode('utf-8')))
+
+        # Store in database
+        eda_report_db = EDAReport(
+            project_id=project_id,
+            dataset_id=dataset_id,
+            summary_metrics=advanced_report["summary_metrics"],
+            data_quality_score=data_quality_score,
+            outliers_json=iforest_details,
+            correlations_json=advanced_report["correlations"],
+            storage_key=storage_key
+        )
+        db.add(eda_report_db)
+
+        # Add Data Lineage
+        lineage = DataLineage(
+            dataset_id=dataset_id,
+            operation_type="advanced_eda",
+            input_storage_key=dataset.storage_key,
+            output_storage_key=storage_key,
+            parameters_json={"target_column": target_column},
+            executed_by=user_id
+        )
+        db.add(lineage)
+        db.commit()
+
+        return {
+            "status": "success",
+            "report_id": eda_report_db.id,
+            "data_quality_score": data_quality_score,
+            "storage_key": storage_key,
+            "report": advanced_report
+        }
+
