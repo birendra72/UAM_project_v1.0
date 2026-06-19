@@ -97,10 +97,19 @@ export default function PredictionInterface({ projectId }: PredictionInterfacePr
     const targetCol = (activeModel.metrics as any)?.target_column as string | undefined;
     const datasetColumns = activeDataset?.columns_json || {};
 
+    const getColumnType = (colVal: any): string => {
+      if (!colVal) return 'float64';
+      if (typeof colVal === 'string') return colVal;
+      if (typeof colVal === 'object') {
+        return colVal.inferred_type || colVal.original_dtype || 'float64';
+      }
+      return 'float64';
+    };
+
     if (modelFeatures && modelFeatures.length > 0) {
       return modelFeatures.map(name => ({
         name,
-        type: datasetColumns[name] || 'float64'
+        type: getColumnType(datasetColumns[name])
       }));
     }
 
@@ -113,7 +122,7 @@ export default function PredictionInterface({ projectId }: PredictionInterfacePr
       .filter(k => k !== exclude)
       .map(name => ({
         name,
-        type: datasetColumns[name] || 'float64'
+        type: getColumnType(datasetColumns[name])
       }));
   }, [activeModel, activeDataset]);
 
@@ -124,7 +133,7 @@ export default function PredictionInterface({ projectId }: PredictionInterfacePr
       const templateObj: Record<string, any> = {};
       
       features.forEach(f => {
-        const isNum = f.type.includes('int') || f.type.includes('float') || f.type.includes('double') || f.type.includes('num');
+        const isNum = typeof f.type === 'string' && (f.type.includes('int') || f.type.includes('float') || f.type.includes('double') || f.type.includes('num'));
         const defaultVal = isNum ? '0' : '';
         initialForm[f.name] = defaultVal;
         templateObj[f.name] = isNum ? 0.0 : 'value';
@@ -268,7 +277,7 @@ export default function PredictionInterface({ projectId }: PredictionInterfacePr
       const payload: Record<string, any> = {};
       features.forEach(f => {
         const val = formData[f.name];
-        const isNum = f.type.includes('int') || f.type.includes('float') || f.type.includes('double') || f.type.includes('num');
+        const isNum = typeof f.type === 'string' && (f.type.includes('int') || f.type.includes('float') || f.type.includes('double') || f.type.includes('num'));
         if (isNum) {
           payload[f.name] = parseFloat(val) || 0;
         } else {
@@ -409,7 +418,7 @@ export default function PredictionInterface({ projectId }: PredictionInterfacePr
               {features.length > 0 ? (
                 <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-4 max-h-[350px] overflow-y-auto pr-1">
                   {features.map((f) => {
-                    const isNum = f.type.includes('int') || f.type.includes('float') || f.type.includes('double') || f.type.includes('num');
+                    const isNum = typeof f.type === 'string' && (f.type.includes('int') || f.type.includes('float') || f.type.includes('double') || f.type.includes('num'));
                     return (
                       <div key={f.name} className="space-y-1.5 group">
                         <Label htmlFor={`form-field-${f.name}`} className="text-xs font-semibold text-slate-400 flex items-center justify-between group-hover:text-slate-300 transition-colors">
