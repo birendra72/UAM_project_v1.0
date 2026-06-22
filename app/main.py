@@ -34,10 +34,14 @@ app.add_exception_handler(Exception, global_exception_handler)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("uam-backend")
 
-# CORS settings - parse from environment config
 origins = []
 if settings.ALLOWED_ORIGINS:
     origins = [origin.strip() for origin in settings.ALLOWED_ORIGINS.split(",") if origin.strip()]
+
+local_origins = ["http://localhost:8080", "http://127.0.0.1:8080", "http://localhost:5173", "http://127.0.0.1:5173"]
+for origin in local_origins:
+    if origin not in origins:
+        origins.append(origin)
 
 app.add_middleware(
     CORSMiddleware,
