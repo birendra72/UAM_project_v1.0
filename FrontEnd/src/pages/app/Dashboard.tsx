@@ -391,12 +391,12 @@ export default function Dashboard() {
                   Active AutoML
                 </Button>
               </Link>
-              <a href="/app/settings" className="w-full">
+              <Link to="/app/settings" className="w-full">
                 <Button variant="outline" className="w-full justify-start gap-2 h-10 border-slate-900 hover:border-slate-800 hover:bg-slate-800/30 text-slate-300 hover:text-slate-100 text-xs">
                   <Code2 className="h-3.5 w-3.5" />
                   API Access Keys
                 </Button>
-              </a>
+              </Link>
             </div>
           </Card>
 

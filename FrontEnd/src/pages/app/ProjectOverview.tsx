@@ -6,7 +6,7 @@ import { ArrowLeft, Database, BarChart, Brain, Download, Play, Loader2, Upload, 
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useDropzone } from "react-dropzone";
 import { toast } from "sonner";
 import DatasetPreviewModal from "@/components/DatasetPreviewModal";
@@ -123,8 +123,31 @@ export default function ProjectOverview() {
   };
 
   const handleTabChange = (value: string) => {
-    setSearchParams({ tab: value });
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("tab", value);
+      return next;
+    }, { replace: true });
   };
+
+  useEffect(() => {
+    if (!searchParams.has("tab")) {
+      const savedTab = sessionStorage.getItem(`project-overview-tab-${projectId}`);
+      if (savedTab) {
+        setSearchParams((prev) => {
+          const next = new URLSearchParams(prev);
+          next.set("tab", savedTab);
+          return next;
+        }, { replace: true });
+      }
+    }
+  }, [projectId, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (projectId && activeTab) {
+      sessionStorage.setItem(`project-overview-tab-${projectId}`, activeTab);
+    }
+  }, [activeTab, projectId]);
 
   if (projectLoading) {
     return (

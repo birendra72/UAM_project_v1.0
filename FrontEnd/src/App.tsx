@@ -68,7 +68,7 @@ const App = () => (
 
               {/* App Routes */}
               <Route
-                path="/app/dashboard"
+                path="/app/dashboard/*"
                 element={
                   <ProtectedRoute>
                     <Dashboard />
@@ -76,15 +76,7 @@ const App = () => (
                 }
               />
               <Route
-                path="/app/projects"
-                element={
-                  <ProtectedRoute>
-                    <Projects />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/app/projects/:projectId/overview"
+                path="/app/projects/:projectId/*"
                 element={
                   <ProtectedRoute>
                     <ProjectOverview />
@@ -92,7 +84,15 @@ const App = () => (
                 }
               />
               <Route
-                path="/app/datasets"
+                path="/app/projects/*"
+                element={
+                  <ProtectedRoute>
+                    <Projects />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/app/datasets/*"
                 element={
                   <ProtectedRoute>
                     <Datasets />
@@ -100,7 +100,7 @@ const App = () => (
                 }
               />
               <Route
-                path="/app/models"
+                path="/app/models/*"
                 element={
                   <ProtectedRoute>
                     <Models />
@@ -108,7 +108,7 @@ const App = () => (
                 }
               />
               <Route
-                path="/app/templates"
+                path="/app/templates/*"
                 element={
                   <ProtectedRoute>
                     <AppTemplates />
@@ -116,10 +116,18 @@ const App = () => (
                 }
               />
               <Route
-                path="/app/settings"
+                path="/app/settings/*"
                 element={
                   <ProtectedRoute>
                     <Settings />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/app/*"
+                element={
+                  <ProtectedRoute>
+                    <NotFound />
                   </ProtectedRoute>
                 }
               />

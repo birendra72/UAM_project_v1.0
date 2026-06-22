@@ -1,33 +1,35 @@
 import React from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 
 interface ProtectedRouteProps {
-  children: JSX.Element;
+  children: React.ReactNode;
   requiredRole?: string;
 }
 
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole }) => {
   const { user, isAuthenticated, isLoading, role } = useAuth();
-
-  console.log('ProtectedRoute:', { isAuthenticated, isLoading, role, requiredRole, user });
+  const location = useLocation();
 
   if (isLoading) {
     return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
   }
 
   if (!isAuthenticated || !user) {
-    console.log('Not authenticated, redirecting to login');
-    return <Navigate to="/login" replace />;
+    const redirectTarget = `${location.pathname}${location.search}`;
+    return (
+      <Navigate
+        to={`/login?redirect=${encodeURIComponent(redirectTarget)}`}
+        replace
+      />
+    );
   }
 
   if (requiredRole && role !== requiredRole) {
-    console.log('Role mismatch, redirecting to app dashboard');
-    // Redirect non-admins to app dashboard
     return <Navigate to="/app/dashboard" replace />;
   }
 
-  return children;
+  return <>{children}</>;
 };
 
 export default ProtectedRoute;

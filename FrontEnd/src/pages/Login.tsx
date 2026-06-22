@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,6 +11,7 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { login } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -18,11 +19,14 @@ export default function Login() {
     setError("");
     try {
       const user = await login(email, password);
-      if (user.role === "Admin") {
-        navigate("/admin/dashboard");
-      } else {
-        navigate("/app/dashboard");
-      }
+      const redirectTo = searchParams.get("redirect");
+      const destination = redirectTo && redirectTo.startsWith("/")
+        ? redirectTo
+        : user.role === "Admin"
+          ? "/admin/dashboard"
+          : "/app/dashboard";
+
+      navigate(destination, { replace: true });
     } catch (err: unknown) {
       const error = err as Error;
       setError(error.message || "Login failed");
