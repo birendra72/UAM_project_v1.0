@@ -1,4 +1,4 @@
-# Universal Analyst Model (UAM) Backend
+# Universal Analyst Model (UAM)
 
 A production-ready backend for the Universal Analyst Model platform, designed to empower data analysts and scientists with intelligent automation and collaborative tools. Our platform provides advanced data cleaning, automated exploratory data analysis (EDA), guided machine learning workflows, and seamless project management to accelerate data-driven decision-making.
 
